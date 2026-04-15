@@ -1,0 +1,762 @@
+import {
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ScrollView, KeyboardAvoidingView, Platform, Alert,
+  Image,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { addAccessory, ACCESSORY_TYPES, resolveImageUri } from '../lib/database';
+import * as ImagePicker from 'expo-image-picker';
+import { File, Directory, Paths } from 'expo-file-system';
+import { useEntitlements } from '../lib/useEntitlements';
+import { showPaywall } from '../lib/paywall';
+import { syncAccessoryBatteryLog } from '../lib/accessoryBatterySync';
+import { syncWidgets } from '../lib/widgetSync';
+
+const GOLD = '#C9A84C';
+const BG = '#0D0D0D';
+const SURFACE = '#1A1A1A';
+const BORDER = '#2A2A2A';
+const MUTED = '#555555';
+
+const POWER_TYPES = ['disposable', 'rechargeable_internal', 'rechargeable_swappable', 'dual_solar'] as const;
+const POWER_LABELS: Record<string, string> = {
+  disposable: 'Disposable Battery',
+  rechargeable_internal: 'Rechargeable (Internal)',
+  rechargeable_swappable: 'Rechargeable (Swappable)',
+  dual_solar: 'Dual Solar + Battery',
+};
+const BATTERY_SIZES = ['CR2032', 'CR123A', 'AA', 'AAA', 'CR2354', 'N-cell', 'Other'];
+const CELL_TYPES = ['18650', '21700', '16340', '26650', 'Other'];
+const CONNECTOR_TYPES = ['USB-C', 'Micro-USB', 'Lightning', 'Proprietary'];
+const LASER_COLORS = ['Red', 'Green', 'IR'];
+const IR_TYPES = ['Illuminator', 'Laser', 'Combo'];
+const NFA_FORM_TYPES = ['Form 1', 'Form 4', 'Form 3'];
+const ATF_STATUSES = ['Not Yet Filed', 'Pending (eFiled)', 'Pending (Paper)', 'Approved', 'Denied'];
+const TRIGGER_SUBTYPES = ['Standard', 'Binary', 'Forced Reset Trigger', 'Bump-Stock', 'Match', 'Competition', 'Drop-In', 'Other'];
+const SUPPRESSOR_MOUNTS: { key: 'direct_thread' | 'qd' | 'hybrid'; label: string }[] = [
+  { key: 'direct_thread', label: 'Direct Thread' },
+  { key: 'qd', label: 'QD / Mount' },
+  { key: 'hybrid', label: 'Hybrid' },
+];
+const STOCK_SUBTYPES: { key: 'fixed' | 'folding' | 'collapsible' | 'adjustable'; label: string }[] = [
+  { key: 'fixed', label: 'Fixed' },
+  { key: 'folding', label: 'Folding' },
+  { key: 'collapsible', label: 'Collapsible' },
+  { key: 'adjustable', label: 'Adjustable' },
+];
+const TRIGGER_SHAPES: { key: 'flat' | 'curved'; label: string }[] = [
+  { key: 'flat', label: 'Flat' },
+  { key: 'curved', label: 'Curved' },
+];
+const TRIGGER_STAGES: { key: 'single' | 'two_stage'; label: string }[] = [
+  { key: 'single', label: 'Single-Stage' },
+  { key: 'two_stage', label: 'Two-Stage' },
+];
+const SLING_POINTS: { key: '1_point' | '2_point' | '3_point' | 'convertible'; label: string }[] = [
+  { key: '1_point', label: '1-Point' },
+  { key: '2_point', label: '2-Point' },
+  { key: '3_point', label: '3-Point' },
+  { key: 'convertible', label: 'Convertible' },
+];
+
+function autoFormatDate(text: string, prev: string): string {
+  const digits = text.replace(/\D/g, '');
+  if (text.length < prev.length) return text;
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return digits.slice(0, 2) + '/' + digits.slice(2);
+  return digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4, 8);
+}
+
+async function saveImagePermanently(uri: string): Promise<string> {
+  const dir = new Directory(Paths.document, 'accessories');
+  if (!dir.exists) dir.create();
+  const ext = uri.split('.').pop() ?? 'jpg';
+  const filename = `acc_${Date.now()}.${ext}`;
+  const source = new File(uri);
+  const dest = new File(dir, filename);
+  source.copy(dest);
+  return 'accessories/' + filename;
+}
+
+function Field({ label, value, onChange, placeholder, keyboardType, last, multiline }: {
+  label: string; value: string; onChange: (v: string) => void;
+  placeholder?: string; keyboardType?: any; last?: boolean; multiline?: boolean;
+}) {
+  return (
+    <View style={[st.fieldWrap, !last && st.fieldBorder]}>
+      <Text style={st.fieldLabel}>{label}</Text>
+      <TextInput
+        style={[st.fieldInput, multiline && { height: 80, textAlignVertical: 'top' }]}
+        value={value} onChangeText={onChange}
+        placeholder={placeholder} placeholderTextColor={MUTED}
+        keyboardType={keyboardType} multiline={multiline}
+      />
+    </View>
+  );
+}
+
+export default function AddAccessory() {
+  const { firearm_id } = useLocalSearchParams<{ firearm_id: string }>();
+  const ent = useEntitlements();
+  const [selectedType, setSelectedType] = useState('');
+  const [make, setMake] = useState('');
+  const [model, setModel] = useState('');
+  const [serialNumber, setSerialNumber] = useState('');
+  const [notes, setNotes] = useState('');
+  const [imageUri, setImageUri] = useState<string | null>(null);
+
+  // Battery-powered fields (optic, light, laser, IR)
+  const [powerType, setPowerType] = useState('');
+  const [batteryType, setBatteryType] = useState('');
+  const [batteryQty, setBatteryQty] = useState('1');
+  const [dateBatteryReplaced, setDateBatteryReplaced] = useState('');
+  const [replacementDays, setReplacementDays] = useState('');
+  const [chargeConnector, setChargeConnector] = useState('');
+  const [dateLastCharged, setDateLastCharged] = useState('');
+  const [cellType, setCellType] = useState('');
+
+  // Optic-specific
+  const [mount, setMount] = useState('');
+  const [brightness, setBrightness] = useState('');
+  const [zeroDistance, setZeroDistance] = useState('');
+
+  // Weapon Light
+  const [lumens, setLumens] = useState('');
+  const [mountPosition, setMountPosition] = useState('');
+
+  // Laser
+  const [laserColor, setLaserColor] = useState('');
+  const [laserMount, setLaserMount] = useState('');
+
+  // IR Device
+  const [irType, setIrType] = useState('');
+
+  // Suppressor
+  const [suppCaliber, setSuppCaliber] = useState('');
+  const [nfaFormType, setNfaFormType] = useState('');
+  const [atfStatus, setAtfStatus] = useState('');
+  const [atfControlNumber, setAtfControlNumber] = useState('');
+  const [dateFiled, setDateFiled] = useState('');
+  const [dateApproved, setDateApproved] = useState('');
+  const [taxPaid, setTaxPaid] = useState('');
+  const [suppLength, setSuppLength] = useState('');
+  const [suppWeight, setSuppWeight] = useState('');
+  const [suppThreadPitch, setSuppThreadPitch] = useState('');
+  const [suppMountType, setSuppMountType] = useState<'' | 'direct_thread' | 'qd' | 'hybrid'>('');
+  const [suppFullAuto, setSuppFullAuto] = useState(false);
+
+  // Stock / Brace
+  const [adjustable, setAdjustable] = useState(false);
+  const [lengthOfPull, setLengthOfPull] = useState('');
+  const [stockSubtype, setStockSubtype] = useState<'' | 'fixed' | 'folding' | 'collapsible' | 'adjustable'>('');
+  const [bufferTubeType, setBufferTubeType] = useState('');
+  const [stockMaterial, setStockMaterial] = useState('');
+
+  // Grip
+  const [texture, setTexture] = useState('');
+  const [gripColor, setGripColor] = useState('');
+  const [gripAngle, setGripAngle] = useState('');
+  const [hasBeavertail, setHasBeavertail] = useState(false);
+  const [hasFingerGrooves, setHasFingerGrooves] = useState(false);
+
+  // Trigger
+  const [pullWeight, setPullWeight] = useState('');
+  const [shoeMaterial, setShoeMaterial] = useState('');
+  const [triggerSubtype, setTriggerSubtype] = useState('');
+  const [triggerShape, setTriggerShape] = useState<'' | 'flat' | 'curved'>('');
+  const [triggerStages, setTriggerStages] = useState<'' | 'single' | 'two_stage'>('');
+  const [resetLength, setResetLength] = useState('');
+
+  // Magazine
+  const [magCapacity, setMagCapacity] = useState('');
+  const [magMaterial, setMagMaterial] = useState('');
+  const [magCount, setMagCount] = useState('');
+  const [magVariant, setMagVariant] = useState('');
+  const [magAntiTilt, setMagAntiTilt] = useState(false);
+  const [magFitsModels, setMagFitsModels] = useState('');
+
+  // Sling
+  const [attachmentType, setAttachmentType] = useState('');
+  const [slingPoints, setSlingPoints] = useState<'' | '1_point' | '2_point' | '3_point' | 'convertible'>('');
+  const [slingMaterial, setSlingMaterial] = useState('');
+  const [slingQd, setSlingQd] = useState(false);
+
+  const hasBattery = ['Red Dot / Optic', 'Weapon Light', 'Laser Sight', 'IR Device'].includes(selectedType);
+
+  async function pickImage() {
+    Alert.alert('Photo', 'Choose an option', [
+      {
+        text: 'Camera',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') { Alert.alert('Permission Required', 'Camera access is needed.'); return; }
+          try {
+            const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [4, 3], quality: 0.8 });
+            if (!result.canceled) { const saved = await saveImagePermanently(result.assets[0].uri); setImageUri(saved); }
+          } catch (e: any) { Alert.alert('Error', e.message); }
+        },
+      },
+      {
+        text: 'Gallery',
+        onPress: async () => {
+          try {
+            const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [4, 3], quality: 0.8 });
+            if (!result.canceled) { const saved = await saveImagePermanently(result.assets[0].uri); setImageUri(saved); }
+          } catch (e: any) { Alert.alert('Error', e.message); }
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  function buildDetails(): string | null {
+    let d: any = {};
+    if (selectedType === 'Red Dot / Optic') {
+      d = { mount, brightness_settings: brightness, zero_distance: zeroDistance };
+    } else if (selectedType === 'Weapon Light') {
+      d = { lumens, mount_position: mountPosition };
+    } else if (selectedType === 'Laser Sight') {
+      d = { color: laserColor, mount: laserMount };
+    } else if (selectedType === 'IR Device') {
+      d = { ir_type: irType };
+    } else if (selectedType === 'Suppressor') {
+      d = {
+        caliber: suppCaliber, nfa_form_type: nfaFormType, atf_status: atfStatus,
+        atf_control_number: atfControlNumber, date_filed: dateFiled,
+        date_approved: dateApproved, tax_paid: taxPaid ? parseFloat(taxPaid) : undefined,
+        length_inches: suppLength, weight_oz: suppWeight, thread_pitch: suppThreadPitch,
+        mount_type: suppMountType || undefined,
+        full_auto_rated: suppFullAuto || undefined,
+      };
+    } else if (selectedType === 'Stock / Brace') {
+      d = {
+        adjustable, length_of_pull: lengthOfPull,
+        subtype: stockSubtype || undefined,
+        buffer_tube_type: bufferTubeType, material: stockMaterial,
+      };
+    } else if (selectedType === 'Grip / Grip Module') {
+      d = {
+        texture, color: gripColor,
+        angle_deg: gripAngle,
+        has_beavertail: hasBeavertail || undefined,
+        finger_grooves: hasFingerGrooves || undefined,
+      };
+    } else if (selectedType === 'Trigger') {
+      d = {
+        pull_weight: pullWeight, shoe_material: shoeMaterial, trigger_type: triggerSubtype,
+        shape: triggerShape || undefined,
+        stages: triggerStages || undefined,
+        reset_length: resetLength,
+      };
+    } else if (selectedType === 'Magazine') {
+      d = {
+        capacity: magCapacity ? parseInt(magCapacity) : undefined,
+        material: magMaterial,
+        count_owned: magCount ? parseInt(magCount) : undefined,
+        manufacturer_variant: magVariant,
+        anti_tilt_follower: magAntiTilt || undefined,
+        fits_models: magFitsModels,
+      };
+    } else if (selectedType === 'Sling') {
+      d = {
+        attachment_type: attachmentType,
+        points: slingPoints || undefined,
+        material: slingMaterial,
+        qd_hardware: slingQd || undefined,
+      };
+    }
+    // Battery fields for powered accessories
+    if (hasBattery && powerType) {
+      d.power_type = powerType;
+      if (powerType === 'disposable' || powerType === 'dual_solar') {
+        d.battery_type = batteryType; d.battery_qty = batteryQty ? parseInt(batteryQty) : 1;
+        d.date_battery_replaced = dateBatteryReplaced; d.replacement_interval_days = replacementDays ? parseInt(replacementDays) : undefined;
+      }
+      if (powerType === 'rechargeable_internal') {
+        d.charge_connector = chargeConnector; d.date_last_charged = dateLastCharged;
+        d.replacement_interval_days = replacementDays ? parseInt(replacementDays) : undefined;
+      }
+      if (powerType === 'rechargeable_swappable') {
+        d.cell_type = cellType; d.battery_qty = batteryQty ? parseInt(batteryQty) : 1;
+        d.date_battery_replaced = dateBatteryReplaced; d.replacement_interval_days = replacementDays ? parseInt(replacementDays) : undefined;
+      }
+    }
+    // Strip empty values
+    const clean: any = {};
+    for (const [k, v] of Object.entries(d)) {
+      if (v !== '' && v !== undefined && v !== null) clean[k] = v;
+    }
+    return Object.keys(clean).length ? JSON.stringify(clean) : null;
+  }
+
+  async function handleSave() {
+    if (!selectedType) { Alert.alert('Required', 'Select an accessory type.'); return; }
+    const detailsJson = buildDetails();
+    const newId = addAccessory({
+      firearm_id: Number(firearm_id),
+      accessory_type: selectedType,
+      make: make.trim() || undefined,
+      model: model.trim() || undefined,
+      serial_number: serialNumber.trim() || undefined,
+      notes: notes.trim() || undefined,
+      image_uri: imageUri || undefined,
+      details: detailsJson,
+    });
+
+    // Spawn / update the matching battery_log automatically for battery-
+    // powered accessories. Fire and forget — failure to schedule a reminder
+    // shouldn't block the save.
+    try {
+      const parsed = detailsJson ? JSON.parse(detailsJson) : null;
+      await syncAccessoryBatteryLog({
+        accessoryId: newId,
+        firearmId: Number(firearm_id),
+        accessoryType: selectedType,
+        accessoryMake: make.trim() || null,
+        accessoryModel: model.trim() || null,
+        parsedDetails: parsed,
+      });
+    } catch (e) {
+      console.warn('[add-accessory] syncAccessoryBatteryLog failed', e);
+    }
+
+    syncWidgets();
+    router.back();
+  }
+
+  return (
+    <SafeAreaView style={st.container}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={st.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={st.cancel}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={st.title}>Add Accessory</Text>
+          <TouchableOpacity onPress={handleSave}>
+            <Text style={st.save}>Save</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={st.scroll} keyboardShouldPersistTaps="handled">
+          {/* Photo */}
+          <TouchableOpacity style={st.imagePicker} onPress={pickImage}>
+            {imageUri ? (
+              <Image source={{ uri: resolveImageUri(imageUri)! }} style={st.imagePreview} />
+            ) : (
+              <Text style={st.imageText}>＋ Add Photo</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Accessory Type */}
+          <Text style={st.sectionLabel}>ACCESSORY TYPE</Text>
+          <View style={st.chipRow}>
+            {ACCESSORY_TYPES.map((t) => (
+              <TouchableOpacity key={t}
+                style={[st.chip, selectedType === t && st.chipActive]}
+                onPress={() => setSelectedType(selectedType === t ? '' : t)}>
+                <Text style={[st.chipText, selectedType === t && st.chipTextActive]}>{t}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {selectedType ? (
+            <>
+              {/* Common fields */}
+              <View style={st.card}>
+                <Field label="Make" value={make} onChange={setMake} placeholder="e.g. Trijicon, SureFire" />
+                <Field label="Model" value={model} onChange={setModel} placeholder="e.g. RMR Type 2" />
+                {selectedType === 'Suppressor' || selectedType === 'Other' ? (
+                  <Field label="Serial Number" value={serialNumber} onChange={setSerialNumber} placeholder="If applicable" last />
+                ) : <View />}
+              </View>
+
+              {/* ─── Type-specific fields ─── */}
+              {selectedType === 'Red Dot / Optic' && (
+                <>
+                  <Text style={st.sectionLabel}>OPTIC DETAILS</Text>
+                  <View style={st.card}>
+                    <Field label="Mount Type" value={mount} onChange={setMount} placeholder="e.g. Picatinny, RMR cut" />
+                    <Field label="Brightness Settings" value={brightness} onChange={setBrightness} placeholder="e.g. 10 levels + NV" />
+                    <Field label="Zero Distance" value={zeroDistance} onChange={setZeroDistance} placeholder="e.g. 25 yards" last />
+                  </View>
+                </>
+              )}
+
+              {selectedType === 'Weapon Light' && (
+                <>
+                  <Text style={st.sectionLabel}>LIGHT DETAILS</Text>
+                  <View style={st.card}>
+                    <Field label="Lumens" value={lumens} onChange={setLumens} placeholder="e.g. 1000" keyboardType="number-pad" />
+                    <Field label="Mount Position" value={mountPosition} onChange={setMountPosition} placeholder="e.g. Rail, M-LOK" last />
+                  </View>
+                </>
+              )}
+
+              {selectedType === 'Laser Sight' && (
+                <>
+                  <Text style={st.sectionLabel}>LASER DETAILS</Text>
+                  <View style={st.chipRow}>
+                    {LASER_COLORS.map((c) => (
+                      <TouchableOpacity key={c} style={[st.chip, laserColor === c && st.chipActive]}
+                        onPress={() => setLaserColor(laserColor === c ? '' : c)}>
+                        <Text style={[st.chipText, laserColor === c && st.chipTextActive]}>{c}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={st.card}>
+                    <Field label="Mount" value={laserMount} onChange={setLaserMount} placeholder="e.g. Rail, trigger guard" last />
+                  </View>
+                </>
+              )}
+
+              {selectedType === 'IR Device' && (
+                <>
+                  <Text style={st.sectionLabel}>IR DEVICE TYPE</Text>
+                  <View style={st.chipRow}>
+                    {IR_TYPES.map((t) => (
+                      <TouchableOpacity key={t} style={[st.chip, irType === t && st.chipActive]}
+                        onPress={() => setIrType(irType === t ? '' : t)}>
+                        <Text style={[st.chipText, irType === t && st.chipTextActive]}>{t}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
+
+              {selectedType === 'Suppressor' && (
+                <>
+                  <Text style={st.sectionLabel}>SUPPRESSOR SPECS</Text>
+                  <View style={st.card}>
+                    <Field label="Caliber" value={suppCaliber} onChange={setSuppCaliber} placeholder="e.g. 5.56, .30 cal, .45" />
+                    <Field label="Length (in)" value={suppLength} onChange={setSuppLength} placeholder="e.g. 7.0" keyboardType="decimal-pad" />
+                    <Field label="Weight (oz)" value={suppWeight} onChange={setSuppWeight} placeholder="e.g. 17.3" keyboardType="decimal-pad" />
+                    <Field label="Thread Pitch" value={suppThreadPitch} onChange={setSuppThreadPitch} placeholder="e.g. 1/2x28, 5/8x24" />
+                    <View style={st.fieldWrap}>
+                      <Text style={st.fieldLabel}>Mount Type</Text>
+                      <View style={[st.chipRow, { marginTop: 6 }]}>
+                        {SUPPRESSOR_MOUNTS.map((m) => (
+                          <TouchableOpacity key={m.key} style={[st.chipSm, suppMountType === m.key && st.chipActive]}
+                            onPress={() => setSuppMountType(suppMountType === m.key ? '' : m.key)}>
+                            <Text style={[st.chipSmText, suppMountType === m.key && st.chipTextActive]}>{m.label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                    <TouchableOpacity style={[st.toggleRow, st.fieldBorder]} onPress={() => setSuppFullAuto(!suppFullAuto)}>
+                      <Text style={st.fieldLabel}>Full-Auto Rated</Text>
+                      <View style={[st.toggle, suppFullAuto && st.toggleOn]}>
+                        <View style={[st.toggleKnob, suppFullAuto && st.toggleKnobOn]} />
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={st.sectionLabel}>NFA PAPERWORK</Text>
+                  <View style={st.card}>
+                    <View style={st.fieldWrap}>
+                      <Text style={st.fieldLabel}>NFA Form</Text>
+                      <View style={[st.chipRow, { marginTop: 6 }]}>
+                        {NFA_FORM_TYPES.map((f) => (
+                          <TouchableOpacity key={f} style={[st.chipSm, nfaFormType === f && st.chipActive]}
+                            onPress={() => setNfaFormType(nfaFormType === f ? '' : f)}>
+                            <Text style={[st.chipSmText, nfaFormType === f && st.chipTextActive]}>{f}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                    <View style={st.fieldWrap}>
+                      <Text style={st.fieldLabel}>ATF Status</Text>
+                      <View style={[st.chipRow, { marginTop: 6 }]}>
+                        {ATF_STATUSES.map((s) => (
+                          <TouchableOpacity key={s} style={[st.chipSm, atfStatus === s && st.chipActive]}
+                            onPress={() => setAtfStatus(atfStatus === s ? '' : s)}>
+                            <Text style={[st.chipSmText, atfStatus === s && st.chipTextActive]}>{s}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                    <Field label="ATF Control #" value={atfControlNumber} onChange={setAtfControlNumber} placeholder="Control number" />
+                    <Field label="Date Filed" value={dateFiled} onChange={(v) => setDateFiled(autoFormatDate(v, dateFiled))} placeholder="MM/DD/YYYY" keyboardType="number-pad" />
+                    <Field label="Date Approved" value={dateApproved} onChange={(v) => setDateApproved(autoFormatDate(v, dateApproved))} placeholder="MM/DD/YYYY" keyboardType="number-pad" />
+                    <Field label="Tax Paid ($)" value={taxPaid} onChange={setTaxPaid} placeholder="e.g. 200" keyboardType="decimal-pad" last />
+                  </View>
+                </>
+              )}
+
+              {selectedType === 'Stock / Brace' && (
+                <>
+                  <Text style={st.sectionLabel}>STOCK / BRACE TYPE</Text>
+                  <View style={st.chipRow}>
+                    {STOCK_SUBTYPES.map((m) => (
+                      <TouchableOpacity key={m.key} style={[st.chip, stockSubtype === m.key && st.chipActive]}
+                        onPress={() => setStockSubtype(stockSubtype === m.key ? '' : m.key)}>
+                        <Text style={[st.chipText, stockSubtype === m.key && st.chipTextActive]}>{m.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={st.sectionLabel}>STOCK / BRACE DETAILS</Text>
+                  <View style={st.card}>
+                    <TouchableOpacity style={st.toggleRow} onPress={() => setAdjustable(!adjustable)}>
+                      <Text style={st.fieldLabel}>Adjustable</Text>
+                      <View style={[st.toggle, adjustable && st.toggleOn]}>
+                        <View style={[st.toggleKnob, adjustable && st.toggleKnobOn]} />
+                      </View>
+                    </TouchableOpacity>
+                    <Field label="Length of Pull" value={lengthOfPull} onChange={setLengthOfPull} placeholder="e.g. 13.5 inches" />
+                    <Field label="Buffer Tube Type" value={bufferTubeType} onChange={setBufferTubeType} placeholder="e.g. Mil-Spec, Commercial, Pistol" />
+                    <Field label="Material" value={stockMaterial} onChange={setStockMaterial} placeholder="e.g. Polymer, Aluminum, Wood" last />
+                  </View>
+                </>
+              )}
+
+              {selectedType === 'Grip / Grip Module' && (
+                <>
+                  <Text style={st.sectionLabel}>GRIP DETAILS</Text>
+                  <View style={st.card}>
+                    <Field label="Texture" value={texture} onChange={setTexture} placeholder="e.g. Stippled, Rubberized" />
+                    <Field label="Color" value={gripColor} onChange={setGripColor} placeholder="e.g. Black, FDE" />
+                    <Field label="Grip Angle" value={gripAngle} onChange={setGripAngle} placeholder="e.g. 18° or 25°" />
+                    <TouchableOpacity style={st.toggleRow} onPress={() => setHasBeavertail(!hasBeavertail)}>
+                      <Text style={st.fieldLabel}>Beavertail</Text>
+                      <View style={[st.toggle, hasBeavertail && st.toggleOn]}>
+                        <View style={[st.toggleKnob, hasBeavertail && st.toggleKnobOn]} />
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[st.toggleRow, { borderBottomWidth: 0 }]} onPress={() => setHasFingerGrooves(!hasFingerGrooves)}>
+                      <Text style={st.fieldLabel}>Finger Grooves</Text>
+                      <View style={[st.toggle, hasFingerGrooves && st.toggleOn]}>
+                        <View style={[st.toggleKnob, hasFingerGrooves && st.toggleKnobOn]} />
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+
+              {selectedType === 'Trigger' && (
+                <>
+                  <Text style={st.sectionLabel}>TRIGGER TYPE</Text>
+                  <View style={st.chipRow}>
+                    {TRIGGER_SUBTYPES.map((t) => (
+                      <TouchableOpacity key={t} style={[st.chip, triggerSubtype === t && st.chipActive]}
+                        onPress={() => setTriggerSubtype(triggerSubtype === t ? '' : t)}>
+                        <Text style={[st.chipText, triggerSubtype === t && st.chipTextActive]}>{t}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={st.sectionLabel}>SHOE SHAPE</Text>
+                  <View style={st.chipRow}>
+                    {TRIGGER_SHAPES.map((m) => (
+                      <TouchableOpacity key={m.key} style={[st.chip, triggerShape === m.key && st.chipActive]}
+                        onPress={() => setTriggerShape(triggerShape === m.key ? '' : m.key)}>
+                        <Text style={[st.chipText, triggerShape === m.key && st.chipTextActive]}>{m.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={st.sectionLabel}>STAGES</Text>
+                  <View style={st.chipRow}>
+                    {TRIGGER_STAGES.map((m) => (
+                      <TouchableOpacity key={m.key} style={[st.chip, triggerStages === m.key && st.chipActive]}
+                        onPress={() => setTriggerStages(triggerStages === m.key ? '' : m.key)}>
+                        <Text style={[st.chipText, triggerStages === m.key && st.chipTextActive]}>{m.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={st.sectionLabel}>TRIGGER DETAILS</Text>
+                  <View style={st.card}>
+                    <Field label="Pull Weight" value={pullWeight} onChange={setPullWeight} placeholder="e.g. 3.5 lbs" />
+                    <Field label="Shoe Material" value={shoeMaterial} onChange={setShoeMaterial} placeholder="e.g. Aluminum, Polymer" />
+                    <Field label="Reset Length" value={resetLength} onChange={setResetLength} placeholder="e.g. Short, 0.05 inches" last />
+                  </View>
+                </>
+              )}
+
+              {selectedType === 'Magazine' && (
+                <>
+                  <Text style={st.sectionLabel}>MAGAZINE DETAILS</Text>
+                  <View style={st.card}>
+                    <Field label="Capacity" value={magCapacity} onChange={setMagCapacity} placeholder="e.g. 30" keyboardType="number-pad" />
+                    <Field label="Material" value={magMaterial} onChange={setMagMaterial} placeholder="e.g. Steel, Polymer" />
+                    <Field label="Manufacturer Variant" value={magVariant} onChange={setMagVariant} placeholder="e.g. PMAG M3 Gen M3" />
+                    <Field label="Fits Models" value={magFitsModels} onChange={setMagFitsModels} placeholder="e.g. AR-15, SR25, AK47" />
+                    <Field label="Count Owned" value={magCount} onChange={setMagCount} placeholder="e.g. 5" keyboardType="number-pad" />
+                    <TouchableOpacity style={[st.toggleRow, { borderBottomWidth: 0 }]} onPress={() => setMagAntiTilt(!magAntiTilt)}>
+                      <Text style={st.fieldLabel}>Anti-Tilt Follower</Text>
+                      <View style={[st.toggle, magAntiTilt && st.toggleOn]}>
+                        <View style={[st.toggleKnob, magAntiTilt && st.toggleKnobOn]} />
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+
+              {selectedType === 'Sling' && (
+                <>
+                  <Text style={st.sectionLabel}>SLING POINTS</Text>
+                  <View style={st.chipRow}>
+                    {SLING_POINTS.map((m) => (
+                      <TouchableOpacity key={m.key} style={[st.chip, slingPoints === m.key && st.chipActive]}
+                        onPress={() => setSlingPoints(slingPoints === m.key ? '' : m.key)}>
+                        <Text style={[st.chipText, slingPoints === m.key && st.chipTextActive]}>{m.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={st.sectionLabel}>SLING DETAILS</Text>
+                  <View style={st.card}>
+                    <Field label="Attachment Type" value={attachmentType} onChange={setAttachmentType} placeholder="e.g. QD, HK hook, Paracord" />
+                    <Field label="Material" value={slingMaterial} onChange={setSlingMaterial} placeholder="e.g. Nylon, Webbing, Leather" />
+                    <TouchableOpacity style={[st.toggleRow, { borderBottomWidth: 0 }]} onPress={() => setSlingQd(!slingQd)}>
+                      <Text style={st.fieldLabel}>QD Hardware</Text>
+                      <View style={[st.toggle, slingQd && st.toggleOn]}>
+                        <View style={[st.toggleKnob, slingQd && st.toggleKnobOn]} />
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+
+              {/* Battery / Power section for powered accessories */}
+              {hasBattery && (
+                <>
+                  <Text style={st.sectionLabel}>POWER SOURCE</Text>
+                  <View style={st.chipRow}>
+                    {POWER_TYPES.map((p) => (
+                      <TouchableOpacity key={p} style={[st.chip, powerType === p && st.chipActive]}
+                        onPress={() => setPowerType(powerType === p ? '' : p)}>
+                        <Text style={[st.chipText, powerType === p && st.chipTextActive]}>{POWER_LABELS[p]}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  {(powerType === 'disposable' || powerType === 'dual_solar') && !ent.isPro && (
+                    <TouchableOpacity
+                      style={st.prefillBanner}
+                      activeOpacity={0.85}
+                      onPress={() => showPaywall({ mode: 'contextual', feature: 'smart_battery_prefill' })}
+                    >
+                      <View style={st.prefillBadge}><Text style={st.prefillBadgeText}>PRO</Text></View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={st.prefillTitle}>Auto-fill from accessory</Text>
+                        <Text style={st.prefillSub}>Pro picks the battery type, runtime, and replacement interval automatically.</Text>
+                      </View>
+                      <Text style={st.prefillChevron}>›</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {(powerType === 'disposable' || powerType === 'dual_solar') && (
+                    <View style={st.card}>
+                      <View style={st.fieldWrap}>
+                        <Text style={st.fieldLabel}>Battery Type</Text>
+                        <View style={[st.chipRow, { marginTop: 6 }]}>
+                          {BATTERY_SIZES.map((b) => (
+                            <TouchableOpacity key={b} style={[st.chipSm, batteryType === b && st.chipActive]}
+                              onPress={() => setBatteryType(batteryType === b ? '' : b)}>
+                              <Text style={[st.chipSmText, batteryType === b && st.chipTextActive]}>{b}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                      <Field label="Qty per Device" value={batteryQty} onChange={setBatteryQty} keyboardType="number-pad" />
+                      <Field label="Date Last Replaced" value={dateBatteryReplaced} onChange={(v) => setDateBatteryReplaced(autoFormatDate(v, dateBatteryReplaced))} placeholder="MM/DD/YYYY" keyboardType="number-pad" />
+                      <Field label="Replace Every (days)" value={replacementDays} onChange={setReplacementDays} placeholder="e.g. 365" keyboardType="number-pad" last />
+                    </View>
+                  )}
+
+                  {powerType === 'rechargeable_internal' && (
+                    <View style={st.card}>
+                      <View style={st.fieldWrap}>
+                        <Text style={st.fieldLabel}>Connector</Text>
+                        <View style={[st.chipRow, { marginTop: 6 }]}>
+                          {CONNECTOR_TYPES.map((c) => (
+                            <TouchableOpacity key={c} style={[st.chipSm, chargeConnector === c && st.chipActive]}
+                              onPress={() => setChargeConnector(chargeConnector === c ? '' : c)}>
+                              <Text style={[st.chipSmText, chargeConnector === c && st.chipTextActive]}>{c}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                      <Field label="Date Last Charged" value={dateLastCharged} onChange={(v) => setDateLastCharged(autoFormatDate(v, dateLastCharged))} placeholder="MM/DD/YYYY" keyboardType="number-pad" />
+                      <Field label="Charge Reminder (days)" value={replacementDays} onChange={setReplacementDays} placeholder="e.g. 30" keyboardType="number-pad" last />
+                    </View>
+                  )}
+
+                  {powerType === 'rechargeable_swappable' && (
+                    <View style={st.card}>
+                      <View style={st.fieldWrap}>
+                        <Text style={st.fieldLabel}>Cell Type</Text>
+                        <View style={[st.chipRow, { marginTop: 6 }]}>
+                          {CELL_TYPES.map((c) => (
+                            <TouchableOpacity key={c} style={[st.chipSm, cellType === c && st.chipActive]}
+                              onPress={() => setCellType(cellType === c ? '' : c)}>
+                              <Text style={[st.chipSmText, cellType === c && st.chipTextActive]}>{c}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                      <Field label="Qty per Device" value={batteryQty} onChange={setBatteryQty} keyboardType="number-pad" />
+                      <Field label="Date Cells Swapped" value={dateBatteryReplaced} onChange={(v) => setDateBatteryReplaced(autoFormatDate(v, dateBatteryReplaced))} placeholder="MM/DD/YYYY" keyboardType="number-pad" />
+                      <Field label="Swap Interval (days)" value={replacementDays} onChange={setReplacementDays} placeholder="e.g. 90" keyboardType="number-pad" last />
+                    </View>
+                  )}
+                </>
+              )}
+
+              {/* Notes */}
+              <Text style={st.sectionLabel}>NOTES</Text>
+              <View style={st.card}>
+                <Field label="Notes" value={notes} onChange={setNotes} placeholder="Mount torque, zero history, firmware..." multiline last />
+              </View>
+            </>
+          ) : null}
+
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const st = StyleSheet.create({
+  container:    { flex: 1, backgroundColor: BG },
+  header:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14 },
+  cancel:       { color: GOLD, fontSize: 17 },
+  title:        { color: '#fff', fontSize: 18, fontWeight: '700' },
+  save:         { color: GOLD, fontSize: 17, fontWeight: '700' },
+  scroll:       { paddingHorizontal: 20, paddingBottom: 40 },
+  imagePicker:  { width: 120, height: 90, borderRadius: 12, borderWidth: 1, borderColor: BORDER, borderStyle: 'dashed', alignSelf: 'center', alignItems: 'center', justifyContent: 'center', marginBottom: 16, overflow: 'hidden' },
+  imagePreview: { width: '100%', height: '100%' },
+  imageText:    { color: MUTED, fontSize: 14 },
+  sectionLabel: { color: GOLD, fontSize: 11, fontWeight: '700', letterSpacing: 2, marginTop: 20, marginBottom: 8 },
+  chipRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  chip:         { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: BORDER, backgroundColor: SURFACE },
+  chipActive:   { backgroundColor: '#1E1A10', borderColor: GOLD },
+  chipText:     { color: '#888', fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: GOLD },
+  chipSm:       { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: BORDER, backgroundColor: SURFACE },
+  chipSmText:   { color: '#888', fontSize: 12, fontWeight: '600' },
+  card:         { backgroundColor: SURFACE, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: BORDER, marginBottom: 4 },
+  fieldWrap:    { paddingVertical: 10 },
+  fieldBorder:  { borderBottomWidth: 1, borderBottomColor: BORDER },
+  fieldLabel:   { color: '#888', fontSize: 12, marginBottom: 6 },
+  fieldInput:   { color: '#fff', fontSize: 16 },
+  toggleRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: BORDER },
+  toggle:       { width: 48, height: 28, borderRadius: 14, backgroundColor: '#333', justifyContent: 'center', paddingHorizontal: 3 },
+  toggleOn:     { backgroundColor: GOLD },
+  toggleKnob:   { width: 22, height: 22, borderRadius: 11, backgroundColor: '#888' },
+  toggleKnobOn: { backgroundColor: '#fff', alignSelf: 'flex-end' },
+
+  prefillBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#1A1510', borderRadius: 12,
+    borderWidth: 1, borderColor: '#3A2C18',
+    paddingHorizontal: 14, paddingVertical: 12,
+    marginBottom: 10,
+  },
+  prefillBadge: {
+    backgroundColor: '#2A2115', borderColor: '#3A2C18', borderWidth: 1,
+    borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3,
+  },
+  prefillBadgeText: { color: GOLD, fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
+  prefillTitle: { color: GOLD, fontSize: 13, fontWeight: '700' },
+  prefillSub: { color: '#888', fontSize: 11, marginTop: 2, lineHeight: 15 },
+  prefillChevron: { color: GOLD, fontSize: 20, opacity: 0.6 },
+});

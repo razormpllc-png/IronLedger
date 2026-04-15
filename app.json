@@ -1,30 +1,51 @@
 {
   "expo": {
-    "name": "IronLedger",
+    "name": "Iron Ledger",
     "slug": "IronLedger",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "icon": "./assets/Icon.png",
+    "scheme": "ironledger",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#080808"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.razormp.ironledger",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Iron Ledger uses your camera to photograph firearms, accessories, purchase receipts, and ATF documents.",
+        "NSPhotoLibraryUsageDescription": "Iron Ledger accesses your photo library to attach images to firearm and accessory records.",
+        "NSPhotoLibraryAddUsageDescription": "Iron Ledger saves exported insurance reports to your photo library.",
+        "NSFaceIDUsageDescription": "Iron Ledger uses Face ID to unlock your encrypted firearm vault.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#080808"
       },
+      "package": "com.razormp.ironledger",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "1c6912af-0bf2-452c-879a-f90d0265651d"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-secure-store"
+    ]
   }
 }
