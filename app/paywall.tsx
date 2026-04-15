@@ -15,6 +15,7 @@ import {
 } from '../lib/purchases';
 import { PackageKey } from '../lib/purchaseConfig';
 import { getFoundersStatus, FoundersStatus } from '../lib/foundersCounter';
+import { LINKS, openLink } from '../lib/links';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -450,6 +451,16 @@ export default function PaywallScreen() {
           Subscriptions auto-renew unless canceled at least 24 hours before the end of the current period.
           Manage subscriptions in your App Store account settings.
         </Text>
+
+        <View style={s.legalRow}>
+          <TouchableOpacity onPress={() => openLink(LINKS.terms)}>
+            <Text style={s.legalLink}>Terms of Use</Text>
+          </TouchableOpacity>
+          <Text style={s.legalDot}>·</Text>
+          <TouchableOpacity onPress={() => openLink(LINKS.privacy)}>
+            <Text style={s.legalLink}>Privacy Policy</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>

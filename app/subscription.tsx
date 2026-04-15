@@ -23,6 +23,7 @@ import {
   getSubscriptionSummary, SubscriptionSummary,
 } from '../lib/purchases';
 import { showPaywall } from '../lib/paywall';
+import { LINKS, openLink } from '../lib/links';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -224,6 +225,44 @@ export default function SubscriptionScreen() {
             : <Text style={s.rowChev}>›</Text>}
         </TouchableOpacity>
 
+        {/* About / legal links — fulfill App Store review requirements and
+            funnel users back to razormp.com. */}
+        <View style={s.detailCard}>
+          <Text style={s.detailLabel}>ABOUT</Text>
+          <TouchableOpacity
+            style={s.linkRow}
+            onPress={() => openLink(LINKS.website)}
+            activeOpacity={0.7}
+          >
+            <Text style={s.linkLabel}>Visit RazorMP</Text>
+            <Text style={s.rowChev}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.linkRow}
+            onPress={() => openLink(LINKS.support)}
+            activeOpacity={0.7}
+          >
+            <Text style={s.linkLabel}>Support</Text>
+            <Text style={s.rowChev}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.linkRow}
+            onPress={() => openLink(LINKS.privacy)}
+            activeOpacity={0.7}
+          >
+            <Text style={s.linkLabel}>Privacy Policy</Text>
+            <Text style={s.rowChev}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.linkRow, s.linkRowLast]}
+            onPress={() => openLink(LINKS.terms)}
+            activeOpacity={0.7}
+          >
+            <Text style={s.linkLabel}>Terms of Use</Text>
+            <Text style={s.rowChev}>›</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Dev-only diagnostics. __DEV__ is a Metro global. */}
         {__DEV__ ? (
           <View style={s.devCard}>
@@ -313,6 +352,14 @@ const s = StyleSheet.create({
   rowTitle: { color: TEXT, fontSize: 15, fontWeight: '700', marginBottom: 2 },
   rowSub: { color: MUTED, fontSize: 12, lineHeight: 17 },
   rowChev: { color: '#555', fontSize: 22 },
+
+  // About section — text-only rows inside a shared detailCard.
+  linkRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: BORDER,
+  },
+  linkRowLast: { borderBottomWidth: 0, paddingBottom: 4 },
+  linkLabel: { color: TEXT, fontSize: 14, fontWeight: '600' },
 
   devCard: {
     marginTop: 16, padding: 14, borderRadius: 12,
