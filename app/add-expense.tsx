@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { addExpense, getAllFirearms, Firearm, EXPENSE_CATEGORIES } from '../lib/database';
+import SuggestionRow from '../components/SuggestionRow';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -160,6 +161,12 @@ export default function AddExpenseScreen() {
               last
             />
           </View>
+
+          <SuggestionRow
+            source="expense_description"
+            query={description}
+            onPick={setDescription}
+          />
 
           {/* Firearm Link Section */}
           <Text style={styles.sectionLabel}>LINKED FIREARM</Text>

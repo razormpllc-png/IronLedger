@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { addAmmo, getAllFirearms, Firearm } from '../lib/database';
 import { syncWidgets } from '../lib/widgetSync';
+import SmartField from '../components/SmartField';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -99,16 +100,18 @@ export default function AddAmmoScreen() {
           {/* Basic Info Section */}
           <Text style={styles.sectionLabel}>BASIC INFO</Text>
           <View style={styles.card}>
-            <Field
+            <SmartField
               label="Caliber"
               value={caliber}
               onChange={setCaliber}
+              source="ammo_caliber"
               placeholder="e.g. 9mm, .223, 12ga"
             />
-            <Field
+            <SmartField
               label="Brand"
               value={brand}
               onChange={setBrand}
+              source="ammo_brand"
               placeholder="e.g. Federal, Hornady"
               last
             />

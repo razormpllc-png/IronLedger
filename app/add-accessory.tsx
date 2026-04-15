@@ -13,6 +13,7 @@ import { useEntitlements } from '../lib/useEntitlements';
 import { showPaywall } from '../lib/paywall';
 import { syncAccessoryBatteryLog } from '../lib/accessoryBatterySync';
 import { syncWidgets } from '../lib/widgetSync';
+import SmartField from '../components/SmartField';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -365,8 +366,8 @@ export default function AddAccessory() {
             <>
               {/* Common fields */}
               <View style={st.card}>
-                <Field label="Make" value={make} onChange={setMake} placeholder="e.g. Trijicon, SureFire" />
-                <Field label="Model" value={model} onChange={setModel} placeholder="e.g. RMR Type 2" />
+                <SmartField label="Make" value={make} onChange={setMake} source="accessory_make" placeholder="e.g. Trijicon, SureFire" />
+                <SmartField label="Model" value={model} onChange={setModel} source="accessory_model" placeholder="e.g. RMR Type 2" />
                 {selectedType === 'Suppressor' || selectedType === 'Other' ? (
                   <Field label="Serial Number" value={serialNumber} onChange={setSerialNumber} placeholder="If applicable" last />
                 ) : <View />}
@@ -429,7 +430,7 @@ export default function AddAccessory() {
                 <>
                   <Text style={st.sectionLabel}>SUPPRESSOR SPECS</Text>
                   <View style={st.card}>
-                    <Field label="Caliber" value={suppCaliber} onChange={setSuppCaliber} placeholder="e.g. 5.56, .30 cal, .45" />
+                    <SmartField label="Caliber" value={suppCaliber} onChange={setSuppCaliber} source="suppressor_caliber" placeholder="e.g. 5.56, .30 cal, .45" />
                     <Field label="Length (in)" value={suppLength} onChange={setSuppLength} placeholder="e.g. 7.0" keyboardType="decimal-pad" />
                     <Field label="Weight (oz)" value={suppWeight} onChange={setSuppWeight} placeholder="e.g. 17.3" keyboardType="decimal-pad" />
                     <Field label="Thread Pitch" value={suppThreadPitch} onChange={setSuppThreadPitch} placeholder="e.g. 1/2x28, 5/8x24" />

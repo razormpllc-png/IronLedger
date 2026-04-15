@@ -19,6 +19,7 @@ import {
   insertDopeCard, updateDopeCard,
   Firearm, DopeCard, DOPE_UNITS, DopeUnits, DopeCardInput,
 } from '../lib/database';
+import SuggestionRow from '../components/SuggestionRow';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -212,6 +213,7 @@ export default function DopeCardScreen() {
               placeholderTextColor={MUTED}
               maxLength={80}
             />
+            <SuggestionRow source="ammo_brand" query={ammo} onPick={setAmmo} />
           </View>
 
           <Text style={s.sectionLabel}>ZERO</Text>
@@ -256,6 +258,7 @@ export default function DopeCardScreen() {
               placeholderTextColor={MUTED}
               maxLength={120}
             />
+            <SuggestionRow source="accessory_make" query={scope} onPick={setScope} />
           </View>
 
           <Text style={s.sectionLabel}>CONDITIONS</Text>

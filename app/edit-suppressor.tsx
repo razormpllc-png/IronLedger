@@ -23,6 +23,7 @@ import { scanAtfForm } from '../lib/atfOcr';
 import type { AtfExtracted } from '../lib/atfOcr';
 import { saveScanToAtfForms } from '../lib/atfScans';
 import { syncWidgets } from '../lib/widgetSync';
+import SmartField from '../components/SmartField';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -366,9 +367,9 @@ export default function EditSuppressor() {
 
           <Text style={styles.sectionLabel}>IDENTIFICATION</Text>
           <View style={styles.card}>
-            <Field label="Make" value={make} onChange={setMake} placeholder="e.g. SilencerCo" />
-            <Field label="Model" value={model} onChange={setModel} placeholder="e.g. Omega 36M" />
-            <Field label="Caliber" value={caliber} onChange={setCaliber} placeholder="e.g. .30 cal, multi-caliber" />
+            <SmartField label="Make" value={make} onChange={setMake} source="suppressor_make" placeholder="e.g. SilencerCo" />
+            <SmartField label="Model" value={model} onChange={setModel} source="suppressor_model" placeholder="e.g. Omega 36M" />
+            <SmartField label="Caliber" value={caliber} onChange={setCaliber} source="suppressor_caliber" placeholder="e.g. .30 cal, multi-caliber" />
             <Field label="Serial Number" value={serialNumber} onChange={setSerialNumber} placeholder="On the can" autoCapitalize="characters" last />
           </View>
 
@@ -518,7 +519,7 @@ export default function EditSuppressor() {
               value={purchaseDate}
               onChange={(v) => setPurchaseDate(autoFormatDate(v, purchaseDate))}
               placeholder="MM/DD/YYYY" keyboardType="number-pad" />
-            <Field label="Purchased From" value={purchasedFrom} onChange={setPurchasedFrom} placeholder="Dealer / SOT" />
+            <SmartField label="Purchased From" value={purchasedFrom} onChange={setPurchasedFrom} source="purchase_location" placeholder="Dealer / SOT" />
             <Field label="City, State" value={dealerCityState} onChange={setDealerCityState} placeholder="e.g. Austin, TX" />
             <Field label="Purchase Price" value={purchasePrice} onChange={setPurchasePrice} placeholder="0.00" keyboardType="decimal-pad" prefix="$" />
             <Field label="Current Value" value={currentValue} onChange={setCurrentValue} placeholder="0.00" keyboardType="decimal-pad" prefix="$" last />

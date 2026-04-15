@@ -12,6 +12,7 @@ import {
 } from '../lib/database';
 import type { NfaTrust } from '../lib/database';
 import { syncWidgets } from '../lib/widgetSync';
+import SmartField from '../components/SmartField';
 import * as ImagePicker from 'expo-image-picker';
 import { File, Directory, Paths } from 'expo-file-system';
 import { useEntitlements } from '../lib/useEntitlements';
@@ -499,9 +500,9 @@ export default function EditFirearm() {
           <Text style={s.sectionLabel}>IDENTIFICATION</Text>
           <View style={s.card}>
             <Field label="Nickname" value={nickname} onChange={setNickname} placeholder="e.g. Home Defense Glock" />
-            <Field label="Make" value={make} onChange={setMake} placeholder="e.g. Glock" />
-            <Field label="Model" value={model} onChange={setModel} placeholder="e.g. G19 Gen 5" />
-            <Field label="Caliber" value={caliber} onChange={setCaliber} placeholder="e.g. 9mm, .45 ACP" />
+            <SmartField label="Make" value={make} onChange={setMake} source="firearm_make" placeholder="e.g. Glock" />
+            <SmartField label="Model" value={model} onChange={setModel} source="firearm_model" placeholder="e.g. G19 Gen 5" />
+            <SmartField label="Caliber" value={caliber} onChange={setCaliber} source="firearm_caliber" placeholder="e.g. 9mm, .45 ACP" />
             <Field label="Serial Number" value={serialNumber} onChange={setSerialNumber} placeholder="Optional" autoCapitalize="characters" last />
           </View>
 
@@ -559,8 +560,8 @@ export default function EditFirearm() {
           </View>
           <View style={s.card}>
             <Field label="Purchase Date" value={purchaseDate} onChange={(v) => setPurchaseDate(autoFormatDate(v, purchaseDate))} placeholder="MM/DD/YYYY" keyboardType="number-pad" />
-            <Field label="Purchased From" value={purchasedFrom} onChange={setPurchasedFrom} placeholder="Dealer, FFL, private seller" />
-            <Field label="Dealer City & State" value={dealerCityState} onChange={setDealerCityState} placeholder="e.g. Houston, TX" last />
+            <SmartField label="Purchased From" value={purchasedFrom} onChange={setPurchasedFrom} source="purchase_location" placeholder="Dealer, FFL, private seller" />
+            <SmartField label="Dealer City & State" value={dealerCityState} onChange={setDealerCityState} source="dealer_city_state" placeholder="e.g. Houston, TX" last />
           </View>
 
           <Text style={s.sectionLabel}>FINANCIAL</Text>

@@ -12,6 +12,7 @@ import {
   Firearm, Ammo,
 } from '../lib/database';
 import { syncWidgets } from '../lib/widgetSync';
+import SuggestionRow from '../components/SuggestionRow';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -275,6 +276,8 @@ export default function AddSessionScreen() {
               last
             />
           </View>
+
+          <SuggestionRow source="range_location" query={location} onPick={setLocation} />
 
           {recentLocations.length > 0 ? (
             <View style={s.quickRow}>
