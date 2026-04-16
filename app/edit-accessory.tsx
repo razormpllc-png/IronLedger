@@ -432,7 +432,7 @@ export default function EditAccessory() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView contentContainerStyle={st.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ ...st.scroll, paddingBottom: 120 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
           <TouchableOpacity style={st.imagePicker} onPress={pickImage}>
             {imageUri ? (
               <Image source={{ uri: resolveImageUri(imageUri)! }} style={st.imagePreview} />

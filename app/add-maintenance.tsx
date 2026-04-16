@@ -447,7 +447,7 @@ const s = StyleSheet.create({
   cancel: { color: MUTED, fontSize: 16 },
   title: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
   save: { color: GOLD, fontSize: 16, fontWeight: '700' },
-  scroll: { paddingHorizontal: 16, paddingTop: 20 },
+  scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 120 },
   sectionLabel: { color: GOLD, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8, marginTop: 4 },
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
   typeCard: { width: '30%', backgroundColor: SURFACE, borderRadius: 12, borderWidth: 1,

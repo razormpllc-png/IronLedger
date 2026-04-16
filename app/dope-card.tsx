@@ -19,6 +19,7 @@ import {
   insertDopeCard, updateDopeCard,
   Firearm, DopeCard, DOPE_UNITS, DopeUnits, DopeCardInput,
 } from '../lib/database';
+import { useAutoSave } from '../lib/useDraft';
 import SuggestionRow from '../components/SuggestionRow';
 
 const GOLD = '#C9A84C';
@@ -44,6 +45,27 @@ export default function DopeCardScreen() {
   const [scope, setScope] = useState('');
   const [conditions, setConditions] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // ── Auto-save draft ──────────────────────────────────────
+  // For new cards, use 'dope-card'; for editing, use 'dope-card-' + ID
+  const screenKey = editingId ? `dope-card-${editingId}` : 'dope-card';
+  const formSnapshot = useMemo(() => ({
+    firearmId, name, ammo, zero, units, scope, conditions,
+  }), [
+    firearmId, name, ammo, zero, units, scope, conditions,
+  ]);
+  const { restored, clearDraft } = useAutoSave(screenKey, formSnapshot);
+
+  useEffect(() => {
+    if (!restored) return;
+    setFirearmId(restored.firearmId ?? prefillFirearmId);
+    setName(restored.name ?? '');
+    setAmmo(restored.ammo ?? '');
+    setZero(restored.zero ?? '');
+    setUnits(restored.units ?? 'MOA');
+    setScope(restored.scope ?? '');
+    setConditions(restored.conditions ?? '');
+  }, [restored, prefillFirearmId]);
 
   useEffect(() => {
     try {
@@ -110,9 +132,11 @@ export default function DopeCardScreen() {
     try {
       if (existing) {
         updateDopeCard(existing.id, payload);
+        clearDraft();
         router.back();
       } else {
         const newId = insertDopeCard(payload);
+        clearDraft();
         router.replace(`/dope/${newId}`);
       }
     } catch (e: any) {
@@ -161,7 +185,13 @@ export default function DopeCardScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={s.content} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={s.content}
+          contentContainerStyle={{ paddingBottom: 120 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
           <Text style={s.sectionLabel}>FIREARM</Text>
           <View style={s.card}>
             {firearms.map((f, i) => (

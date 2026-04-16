@@ -98,7 +98,7 @@ export default function OnboardingScreen() {
           <Text style={s.brand}>IRON LEDGER</Text>
           <Text style={s.welcome}>Welcome.</Text>
           <Text style={s.sub}>
-            What brings you here? Pick the one that matters most — we'll tailor the app around it.
+            Where would you like to start? Pick the one that matters most — we'll tailor the app around it.
             You can change your mind later.
           </Text>
         </View>

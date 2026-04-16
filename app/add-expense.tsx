@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { addExpense, getAllFirearms, Firearm, EXPENSE_CATEGORIES } from '../lib/database';
+import { useAutoSave } from '../lib/useDraft';
 import SuggestionRow from '../components/SuggestionRow';
 
 const GOLD = '#C9A84C';
@@ -42,6 +43,24 @@ export default function AddExpenseScreen() {
   const [firearms, setFirearms] = useState<Firearm[]>([]);
   const [selectedFirearmId, setSelectedFirearmId] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
+
+  // ── Auto-save draft ──────────────────────────────────────
+  const formSnapshot = useMemo(() => ({
+    date, category, amount, description, selectedFirearmId, notes,
+  }), [
+    date, category, amount, description, selectedFirearmId, notes,
+  ]);
+  const { restored, clearDraft } = useAutoSave('add-expense', formSnapshot);
+
+  useEffect(() => {
+    if (!restored) return;
+    setDate(restored.date ?? todayString());
+    setCategory(restored.category ?? null);
+    setAmount(restored.amount ?? '');
+    setDescription(restored.description ?? '');
+    setSelectedFirearmId(restored.selectedFirearmId ?? null);
+    setNotes(restored.notes ?? '');
+  }, [restored]);
 
   useEffect(() => {
     try {
@@ -79,6 +98,7 @@ export default function AddExpenseScreen() {
         firearm_id: selectedFirearmId || null,
         notes: notes.trim() || null,
       });
+      clearDraft();
       router.back();
     } catch (error) {
       Alert.alert('Error', 'Failed to add expense');
@@ -103,7 +123,13 @@ export default function AddExpenseScreen() {
         </View>
 
         {/* Content */}
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={{ paddingBottom: 120 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
           {/* Expense Details Section */}
           <Text style={styles.sectionLabel}>EXPENSE DETAILS</Text>
           <View style={styles.card}>

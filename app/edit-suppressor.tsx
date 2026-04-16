@@ -574,7 +574,7 @@ const styles = StyleSheet.create({
   cancel: { color: MUTED, fontSize: 16 },
   title: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
   save: { color: GOLD, fontSize: 16, fontWeight: '700' },
-  scroll: { paddingHorizontal: 16, paddingTop: 20 },
+  scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 120 },
   photoBox: { width: '100%', height: 200, borderRadius: 12, overflow: 'hidden',
     backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, marginBottom: 20 },
   photo: { width: '100%', height: '100%' },

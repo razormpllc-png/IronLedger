@@ -11,13 +11,14 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 import {
   addSuppressor, resolveImageUri, getAllFirearms, getAllSuppressors,
   getAllNfaTrusts, setSuppressorAtfForm,
 } from '../lib/database';
 import type { NfaTrust } from '../lib/database';
+import { useAutoSave } from '../lib/useDraft';
 import * as ImagePicker from 'expo-image-picker';
 import { File, Directory, Paths } from 'expo-file-system';
 import { useEntitlements } from '../lib/useEntitlements';
@@ -103,6 +104,51 @@ export default function AddSuppressor() {
   // Stash the raw URI of the most recent accepted ATF scan so we can
   // copy it into the ATF Form On File slot after insertion gives us an ID.
   const [pendingAtfScanUri, setPendingAtfScanUri] = useState<string | null>(null);
+
+  // ── Auto-save draft ──────────────────────────────────────
+  const formSnapshot = useMemo(() => ({
+    make, model, caliber, serialNumber, purchaseDate, purchasePrice, currentValue,
+    selectedCondition, purchasedFrom, dealerCityState, storageLocation, roundCount, notes,
+    hostNotes, nfaFormType, atfStatus, atfControlNumber, dateFiled, dateApproved, taxPaid,
+    trustType, trustId, lengthInches, weightOz, threadPitch, mountType, fullAutoRated,
+  }), [
+    make, model, caliber, serialNumber, purchaseDate, purchasePrice, currentValue,
+    selectedCondition, purchasedFrom, dealerCityState, storageLocation, roundCount, notes,
+    hostNotes, nfaFormType, atfStatus, atfControlNumber, dateFiled, dateApproved, taxPaid,
+    trustType, trustId, lengthInches, weightOz, threadPitch, mountType, fullAutoRated,
+  ]);
+  const { restored, clearDraft } = useAutoSave('add-suppressor', formSnapshot);
+
+  useEffect(() => {
+    if (!restored) return;
+    setMake(restored.make ?? '');
+    setModel(restored.model ?? '');
+    setCaliber(restored.caliber ?? '');
+    setSerialNumber(restored.serialNumber ?? '');
+    setPurchaseDate(restored.purchaseDate ?? '');
+    setPurchasePrice(restored.purchasePrice ?? '');
+    setCurrentValue(restored.currentValue ?? '');
+    setSelectedCondition(restored.selectedCondition ?? '');
+    setPurchasedFrom(restored.purchasedFrom ?? '');
+    setDealerCityState(restored.dealerCityState ?? '');
+    setStorageLocation(restored.storageLocation ?? '');
+    setRoundCount(restored.roundCount ?? '');
+    setNotes(restored.notes ?? '');
+    setHostNotes(restored.hostNotes ?? '');
+    setNfaFormType(restored.nfaFormType ?? '');
+    setAtfStatus(restored.atfStatus ?? '');
+    setAtfControlNumber(restored.atfControlNumber ?? '');
+    setDateFiled(restored.dateFiled ?? '');
+    setDateApproved(restored.dateApproved ?? '');
+    setTaxPaid(restored.taxPaid ?? '');
+    setTrustType(restored.trustType ?? '');
+    setTrustId(restored.trustId ?? null);
+    setLengthInches(restored.lengthInches ?? '');
+    setWeightOz(restored.weightOz ?? '');
+    setThreadPitch(restored.threadPitch ?? '');
+    setMountType(restored.mountType ?? '');
+    setFullAutoRated(restored.fullAutoRated ?? false);
+  }, [restored]);
 
   useFocusEffect(useCallback(() => { setTrusts(getAllNfaTrusts()); }, []));
 
@@ -287,6 +333,7 @@ export default function AddSuppressor() {
     }
 
     syncWidgets();
+    clearDraft();
 
     // Trigger 2 (spec §4.6): soft nudge on the 3rd combined item added for
     // Lite users — warms them up before the hard cap.
@@ -540,7 +587,7 @@ const styles = StyleSheet.create({
   cancel: { color: MUTED, fontSize: 16 },
   title: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
   save: { color: GOLD, fontSize: 16, fontWeight: '700' },
-  scroll: { paddingHorizontal: 16, paddingTop: 20 },
+  scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 120 },
   photoBox: { width: '100%', height: 200, borderRadius: 12, overflow: 'hidden',
     backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, marginBottom: 20 },
   photo: { width: '100%', height: '100%' },

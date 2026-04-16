@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, ScrollView, KeyboardAvoidingView,
   TouchableOpacity, Platform, Alert, StyleSheet, Modal,
@@ -11,6 +11,7 @@ import {
   getAllFirearms, getAllAmmo, getRecentRangeLocations,
   Firearm, Ammo,
 } from '../lib/database';
+import { useAutoSave } from '../lib/useDraft';
 import { syncWidgets } from '../lib/widgetSync';
 import SuggestionRow from '../components/SuggestionRow';
 
@@ -85,6 +86,22 @@ export default function AddSessionScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerKind, setPickerKind] = useState<'firearm' | 'ammo'>('firearm');
   const [pickerLineKey, setPickerLineKey] = useState<string | null>(null);
+
+  // ── Auto-save draft ──────────────────────────────────────
+  const formSnapshot = useMemo(() => ({
+    date, location, weather, notes,
+  }), [
+    date, location, weather, notes,
+  ]);
+  const { restored, clearDraft } = useAutoSave('add-session', formSnapshot);
+
+  useEffect(() => {
+    if (!restored) return;
+    setDate(restored.date ?? todayDisplay());
+    setLocation(restored.location ?? '');
+    setWeather(restored.weather ?? '');
+    setNotes(restored.notes ?? '');
+  }, [restored]);
 
   useEffect(() => {
     try {
@@ -218,6 +235,7 @@ export default function AddSessionScreen() {
         addRangeSession(sessionPayload, cleanedLines);
       }
       syncWidgets();
+      clearDraft();
       router.back();
     } catch (e) {
       Alert.alert('Save failed', 'Could not save this range session.');
@@ -249,7 +267,7 @@ export default function AddSessionScreen() {
 
         <ScrollView
           style={s.content}
-          contentContainerStyle={{ paddingBottom: 40 }}
+          contentContainerStyle={{ paddingBottom: 120 }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >

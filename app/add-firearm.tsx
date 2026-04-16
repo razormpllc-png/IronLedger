@@ -4,8 +4,9 @@ import {
   Image, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { router, useFocusEffect } from 'expo-router';
+import { useAutoSave } from '../lib/useDraft';
 import { addFirearm, resolveImageUri, getAllFirearms, getAllSuppressors, getAllNfaTrusts, getNfaTrustById, setFirearmAtfForm } from '../lib/database';
 import { saveScanToAtfForms } from '../lib/atfScans';
 import { syncWidgets } from '../lib/widgetSync';
@@ -107,6 +108,58 @@ export default function AddFirearm() {
   const [pendingAtfScanUri, setPendingAtfScanUri] = useState<string | null>(null);
   const [receiptOcrRunning, setReceiptOcrRunning] = useState(false);
   const [form4473OcrRunning, setForm4473OcrRunning] = useState(false);
+
+  // ── Auto-save draft ──────────────────────────────────────
+  const formSnapshot = useMemo(() => ({
+    nickname, make, model, caliber, serialNumber, selectedTypes, actionType,
+    triggerType, purchaseDate, purchasePrice, currentValue, selectedCondition,
+    acquisitionMethod, purchasedFrom, dealerCityState, storageLocation,
+    roundCount, notes, isNfa, nfaFormType, nfaCategories, atfStatus,
+    atfControlNumber, dateFiled, dateApproved, taxPaid, trustType, trustName,
+    responsiblePersons, trustId,
+  }), [
+    nickname, make, model, caliber, serialNumber, selectedTypes, actionType,
+    triggerType, purchaseDate, purchasePrice, currentValue, selectedCondition,
+    acquisitionMethod, purchasedFrom, dealerCityState, storageLocation,
+    roundCount, notes, isNfa, nfaFormType, nfaCategories, atfStatus,
+    atfControlNumber, dateFiled, dateApproved, taxPaid, trustType, trustName,
+    responsiblePersons, trustId,
+  ]);
+  const { restored, clearDraft } = useAutoSave('add-firearm', formSnapshot);
+
+  useEffect(() => {
+    if (!restored) return;
+    setNickname(restored.nickname ?? '');
+    setMake(restored.make ?? '');
+    setModel(restored.model ?? '');
+    setCaliber(restored.caliber ?? '');
+    setSerialNumber(restored.serialNumber ?? '');
+    setSelectedTypes(restored.selectedTypes ?? []);
+    setActionType(restored.actionType ?? '');
+    setTriggerType(restored.triggerType ?? '');
+    setPurchaseDate(restored.purchaseDate ?? '');
+    setPurchasePrice(restored.purchasePrice ?? '');
+    setCurrentValue(restored.currentValue ?? '');
+    setSelectedCondition(restored.selectedCondition ?? '');
+    setAcquisitionMethod(restored.acquisitionMethod ?? '');
+    setPurchasedFrom(restored.purchasedFrom ?? '');
+    setDealerCityState(restored.dealerCityState ?? '');
+    setStorageLocation(restored.storageLocation ?? '');
+    setRoundCount(restored.roundCount ?? '');
+    setNotes(restored.notes ?? '');
+    setIsNfa(restored.isNfa ?? false);
+    setNfaFormType(restored.nfaFormType ?? '');
+    setNfaCategories(restored.nfaCategories ?? []);
+    setAtfStatus(restored.atfStatus ?? '');
+    setAtfControlNumber(restored.atfControlNumber ?? '');
+    setDateFiled(restored.dateFiled ?? '');
+    setDateApproved(restored.dateApproved ?? '');
+    setTaxPaid(restored.taxPaid ?? '');
+    setTrustType(restored.trustType ?? '');
+    setTrustName(restored.trustName ?? '');
+    setResponsiblePersons(restored.responsiblePersons ?? '');
+    setTrustId(restored.trustId ?? null);
+  }, [restored]);
 
   // Reload trusts whenever this screen regains focus — so a trust created
   // in the nested /nfa-trust/new modal immediately shows up in the picker.
@@ -634,6 +687,7 @@ export default function AddFirearm() {
     }
 
     syncWidgets();
+    clearDraft();
 
     // Trigger 2 (spec §4.6): soft nudge once the user's combined vault
     // (firearms + suppressors) hits 3 — warms them up before the hard cap.
@@ -991,7 +1045,7 @@ const styles = StyleSheet.create({
   cancel: { color: MUTED, fontSize: 16 },
   title: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
   save: { color: GOLD, fontSize: 16, fontWeight: '700' },
-  scroll: { paddingHorizontal: 16, paddingTop: 20 },
+  scroll: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 120 },
   photoBox: { width: '100%', height: 200, borderRadius: 12, overflow: 'hidden',
     backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, marginBottom: 20 },
   photo: { width: '100%', height: '100%' },

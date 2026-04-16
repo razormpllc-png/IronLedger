@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { addAmmo, getAllFirearms, Firearm } from '../lib/database';
+import { useAutoSave } from '../lib/useDraft';
 import { syncWidgets } from '../lib/widgetSync';
 import SmartField from '../components/SmartField';
 
@@ -39,6 +40,28 @@ export default function AddAmmoScreen() {
   const [pairedIds, setPairedIds] = useState<number[]>([]);
 
   const typeOptions = ['FMJ', 'JHP', 'SP', 'Match', 'Buckshot', 'Slug', 'Other'];
+
+  // ── Auto-save draft ──────────────────────────────────────
+  const formSnapshot = useMemo(() => ({
+    caliber, brand, grain, type, quantity, roundsPerBox, costPerBox, lowStockThreshold, notes, pairedIds,
+  }), [
+    caliber, brand, grain, type, quantity, roundsPerBox, costPerBox, lowStockThreshold, notes, pairedIds,
+  ]);
+  const { restored, clearDraft } = useAutoSave('add-ammo', formSnapshot);
+
+  useEffect(() => {
+    if (!restored) return;
+    setCaliber(restored.caliber ?? '');
+    setBrand(restored.brand ?? '');
+    setGrain(restored.grain ?? '');
+    setType(restored.type ?? null);
+    setQuantity(restored.quantity ?? '');
+    setRoundsPerBox(restored.roundsPerBox ?? '50');
+    setCostPerBox(restored.costPerBox ?? '');
+    setLowStockThreshold(restored.lowStockThreshold ?? '100');
+    setNotes(restored.notes ?? '');
+    setPairedIds(restored.pairedIds ?? []);
+  }, [restored]);
 
   useEffect(() => {
     try { setFirearms(getAllFirearms()); } catch {}
@@ -72,6 +95,7 @@ export default function AddAmmoScreen() {
         notes: notes.trim() || null,
       });
       syncWidgets();
+      clearDraft();
       router.back();
     } catch (error) {
       Alert.alert('Error', 'Failed to add ammo');
@@ -96,7 +120,13 @@ export default function AddAmmoScreen() {
         </View>
 
         {/* Content */}
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={{ paddingBottom: 120 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
           {/* Basic Info Section */}
           <Text style={styles.sectionLabel}>BASIC INFO</Text>
           <View style={styles.card}>

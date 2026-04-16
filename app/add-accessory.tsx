@@ -4,9 +4,10 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { addAccessory, ACCESSORY_TYPES, resolveImageUri } from '../lib/database';
+import { useAutoSave } from '../lib/useDraft';
 import * as ImagePicker from 'expo-image-picker';
 import { File, Directory, Paths } from 'expo-file-system';
 import { useEntitlements } from '../lib/useEntitlements';
@@ -184,6 +185,95 @@ export default function AddAccessory() {
   const [slingMaterial, setSlingMaterial] = useState('');
   const [slingQd, setSlingQd] = useState(false);
 
+  // ── Auto-save draft ──────────────────────────────────────
+  const formSnapshot = useMemo(() => ({
+    selectedType, make, model, serialNumber, notes, powerType, batteryType, batteryQty,
+    dateBatteryReplaced, replacementDays, chargeConnector, dateLastCharged, cellType,
+    mount, brightness, zeroDistance, lumens, mountPosition, laserColor, laserMount,
+    irType, suppCaliber, nfaFormType, atfStatus, atfControlNumber, dateFiled, dateApproved,
+    taxPaid, suppLength, suppWeight, suppThreadPitch, suppMountType, suppFullAuto,
+    adjustable, lengthOfPull, stockSubtype, bufferTubeType, stockMaterial,
+    texture, gripColor, gripAngle, hasBeavertail, hasFingerGrooves,
+    pullWeight, shoeMaterial, triggerSubtype, triggerShape, triggerStages, resetLength,
+    magCapacity, magMaterial, magCount, magVariant, magAntiTilt, magFitsModels,
+    attachmentType, slingPoints, slingMaterial, slingQd,
+  }), [
+    selectedType, make, model, serialNumber, notes, powerType, batteryType, batteryQty,
+    dateBatteryReplaced, replacementDays, chargeConnector, dateLastCharged, cellType,
+    mount, brightness, zeroDistance, lumens, mountPosition, laserColor, laserMount,
+    irType, suppCaliber, nfaFormType, atfStatus, atfControlNumber, dateFiled, dateApproved,
+    taxPaid, suppLength, suppWeight, suppThreadPitch, suppMountType, suppFullAuto,
+    adjustable, lengthOfPull, stockSubtype, bufferTubeType, stockMaterial,
+    texture, gripColor, gripAngle, hasBeavertail, hasFingerGrooves,
+    pullWeight, shoeMaterial, triggerSubtype, triggerShape, triggerStages, resetLength,
+    magCapacity, magMaterial, magCount, magVariant, magAntiTilt, magFitsModels,
+    attachmentType, slingPoints, slingMaterial, slingQd,
+  ]);
+  const { restored, clearDraft } = useAutoSave('add-accessory', formSnapshot);
+
+  useEffect(() => {
+    if (!restored) return;
+    setSelectedType(restored.selectedType ?? '');
+    setMake(restored.make ?? '');
+    setModel(restored.model ?? '');
+    setSerialNumber(restored.serialNumber ?? '');
+    setNotes(restored.notes ?? '');
+    setPowerType(restored.powerType ?? '');
+    setBatteryType(restored.batteryType ?? '');
+    setBatteryQty(restored.batteryQty ?? '1');
+    setDateBatteryReplaced(restored.dateBatteryReplaced ?? '');
+    setReplacementDays(restored.replacementDays ?? '');
+    setChargeConnector(restored.chargeConnector ?? '');
+    setDateLastCharged(restored.dateLastCharged ?? '');
+    setCellType(restored.cellType ?? '');
+    setMount(restored.mount ?? '');
+    setBrightness(restored.brightness ?? '');
+    setZeroDistance(restored.zeroDistance ?? '');
+    setLumens(restored.lumens ?? '');
+    setMountPosition(restored.mountPosition ?? '');
+    setLaserColor(restored.laserColor ?? '');
+    setLaserMount(restored.laserMount ?? '');
+    setIrType(restored.irType ?? '');
+    setSuppCaliber(restored.suppCaliber ?? '');
+    setNfaFormType(restored.nfaFormType ?? '');
+    setAtfStatus(restored.atfStatus ?? '');
+    setAtfControlNumber(restored.atfControlNumber ?? '');
+    setDateFiled(restored.dateFiled ?? '');
+    setDateApproved(restored.dateApproved ?? '');
+    setTaxPaid(restored.taxPaid ?? '');
+    setSuppLength(restored.suppLength ?? '');
+    setSuppWeight(restored.suppWeight ?? '');
+    setSuppThreadPitch(restored.suppThreadPitch ?? '');
+    setSuppMountType(restored.suppMountType ?? '');
+    setSuppFullAuto(restored.suppFullAuto ?? false);
+    setAdjustable(restored.adjustable ?? false);
+    setLengthOfPull(restored.lengthOfPull ?? '');
+    setStockSubtype(restored.stockSubtype ?? '');
+    setBufferTubeType(restored.bufferTubeType ?? '');
+    setStockMaterial(restored.stockMaterial ?? '');
+    setTexture(restored.texture ?? '');
+    setGripColor(restored.gripColor ?? '');
+    setGripAngle(restored.gripAngle ?? '');
+    setHasBeavertail(restored.hasBeavertail ?? false);
+    setHasFingerGrooves(restored.hasFingerGrooves ?? false);
+    setPullWeight(restored.pullWeight ?? '');
+    setShoeMaterial(restored.shoeMaterial ?? '');
+    setTriggerSubtype(restored.triggerSubtype ?? '');
+    setTriggerShape(restored.triggerShape ?? '');
+    setTriggerStages(restored.triggerStages ?? '');
+    setResetLength(restored.resetLength ?? '');
+    setMagCapacity(restored.magCapacity ?? '');
+    setMagMaterial(restored.magMaterial ?? '');
+    setMagCount(restored.magCount ?? '');
+    setMagVariant(restored.magVariant ?? '');
+    setMagAntiTilt(restored.magAntiTilt ?? false);
+    setMagFitsModels(restored.magFitsModels ?? '');
+    setAttachmentType(restored.attachmentType ?? '');
+    setSlingPoints(restored.slingPoints ?? '');
+    setSlingMaterial(restored.slingMaterial ?? '');
+    setSlingQd(restored.slingQd ?? false);
+  }, [restored]);
+
   const hasBattery = ['Red Dot / Optic', 'Weapon Light', 'Laser Sight', 'IR Device'].includes(selectedType);
 
   async function pickImage() {
@@ -324,6 +414,7 @@ export default function AddAccessory() {
     }
 
     syncWidgets();
+    clearDraft();
     router.back();
   }
 
@@ -340,7 +431,7 @@ export default function AddAccessory() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView contentContainerStyle={st.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ ...st.scroll, paddingBottom: 120 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
           {/* Photo */}
           <TouchableOpacity style={st.imagePicker} onPress={pickImage}>
             {imageUri ? (
