@@ -5,7 +5,7 @@
 
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, KeyboardAvoidingView, Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useEffect, useState } from 'react';
@@ -14,6 +14,7 @@ import {
   addNfaTrust, updateNfaTrust, deleteNfaTrust, getNfaTrustById,
   countFirearmsForTrust,
 } from '../../lib/database';
+import FormScrollView from '../../components/FormScrollView';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -89,18 +90,17 @@ export default function TrustEditor() {
 
   return (
     <SafeAreaView style={s.safe}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={s.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={s.cancel}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={s.title}>{isNew ? 'New Trust' : 'Edit Trust'}</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={s.save}>Save</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={s.cancel}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={s.title}>{isNew ? 'New Trust' : 'Edit Trust'}</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={s.save}>Save</Text>
+        </TouchableOpacity>
+      </View>
 
-        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <FormScrollView contentContainerStyle={s.scroll}>
           <Text style={s.sectionLabel}>IDENTITY</Text>
           <View style={s.card}>
             <Field label="Name" value={name} onChange={setName} placeholder="e.g. Smith Family Trust" last />
@@ -159,8 +159,7 @@ export default function TrustEditor() {
           )}
 
           <View style={{ height: 60 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }

@@ -20,7 +20,7 @@ import { syncWidgets } from '../../lib/widgetSync';
 import { useEntitlements } from '../../lib/useEntitlements';
 import type { Tier, OnboardingPath } from '../../lib/entitlements';
 import { runProGated } from '../../lib/paywall';
-import { generateEstateExport } from '../../lib/estateExport';
+// Estate config screen handles export now — navigated via router.push('/estate-config')
 
 // Path-aware spotlight metadata. Drives the "your path" card at the top of
 // the dashboard so the onboarding selection actually changes what the user
@@ -123,26 +123,8 @@ export default function DashboardScreen() {
   const [pendingFirearms, setPendingFirearms] = useState<Firearm[]>([]);
   const [pendingSuppressors, setPendingSuppressors] = useState<Suppressor[]>([]);
   const [allSuppressors, setAllSuppressors] = useState<Suppressor[]>([]);
-  const [estateExporting, setEstateExporting] = useState(false);
-
   function handleEstateExport() {
-    runProGated('insurance_export', async () => {
-      if (estateExporting) return;
-      setEstateExporting(true);
-      try {
-        const result = await generateEstateExport();
-        if (!result.ok && result.reason === 'empty') {
-          Alert.alert(
-            'Nothing to Export',
-            'Add a firearm or suppressor first, then try again.',
-          );
-        }
-      } catch (e: any) {
-        Alert.alert('Export Failed', e?.message ?? 'Could not generate the PDF. Please try again.');
-      } finally {
-        setEstateExporting(false);
-      }
-    });
+    router.push('/estate-config');
   }
   const [batteryLogs, setBatteryLogs] = useState<BatteryLogWithFirearm[]>([]);
   const [maintRollup, setMaintRollup] = useState<MaintenanceRollup>({
@@ -488,7 +470,6 @@ export default function DashboardScreen() {
         <TouchableOpacity
           style={s.insuranceBtn}
           onPress={() => handleEstateExport()}
-          disabled={estateExporting}
           activeOpacity={0.75}
         >
           <Text style={s.insuranceIcon}>🗂️</Text>
@@ -499,7 +480,7 @@ export default function DashboardScreen() {
             </View>
             <Text style={s.insuranceSub}>PDF for your executor — provenance, values, storage locations</Text>
           </View>
-          {estateExporting ? <Text style={s.insuranceChevron}>…</Text> : <Text style={s.insuranceChevron}>›</Text>}
+          <Text style={s.insuranceChevron}>›</Text>
         </TouchableOpacity>
 
         {/* FFL Bound Book (Preview) — ATF-style A&D export. Gated on its

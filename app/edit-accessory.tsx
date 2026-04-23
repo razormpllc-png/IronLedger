@@ -1,10 +1,11 @@
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, KeyboardAvoidingView, Platform, Alert,
+  ScrollView, Alert,
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useEffect } from 'react';
+import FormScrollView from '../components/FormScrollView';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   getAccessoryById, updateAccessory, deleteAccessory, ACCESSORY_TYPES, resolveImageUri,
@@ -421,18 +422,17 @@ export default function EditAccessory() {
 
   return (
     <SafeAreaView style={st.container}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={st.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={st.cancel}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={st.title}>Edit Accessory</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={st.save}>Save</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={st.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={st.cancel}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={st.title}>Edit Accessory</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={st.save}>Save</Text>
+        </TouchableOpacity>
+      </View>
 
-        <ScrollView contentContainerStyle={{ ...st.scroll, paddingBottom: 120 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+      <FormScrollView contentContainerStyle={{ ...st.scroll, paddingBottom: 120 }}>
           <TouchableOpacity style={st.imagePicker} onPress={pickImage}>
             {imageUri ? (
               <Image source={{ uri: resolveImageUri(imageUri)! }} style={st.imagePreview} />
@@ -786,8 +786,7 @@ export default function EditAccessory() {
           ) : null}
 
           <View style={{ height: 40 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }

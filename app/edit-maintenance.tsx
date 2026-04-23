@@ -1,10 +1,11 @@
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, KeyboardAvoidingView, Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useEffect } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
+import FormScrollView from '../components/FormScrollView';
 import {
   getMaintenanceLogById, updateMaintenanceLog, getFirearmById,
   parseDetails, CleaningDetails, InspectionDetails, RepairDetails, UpgradeDetails, RangeSessionDetails,
@@ -186,17 +187,16 @@ export default function EditMaintenance() {
 
   return (
     <SafeAreaView style={s.container}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={s.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={s.cancel}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={s.title}>Edit Entry</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={s.save}>Save</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={s.cancel}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={s.title}>Edit Entry</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={s.save}>Save</Text>
+        </TouchableOpacity>
+      </View>
+      <FormScrollView contentContainerStyle={s.scroll}>
 
           <Text style={s.sectionLabel}>TYPE</Text>
           <View style={s.typeGrid}>
@@ -343,8 +343,7 @@ export default function EditMaintenance() {
           </View>
 
           <View style={{ height: 60 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }

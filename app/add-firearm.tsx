@@ -1,10 +1,11 @@
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, KeyboardAvoidingView, Platform, Alert,
+  ScrollView, Alert, Linking,
   Image, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useCallback, useEffect, useMemo } from 'react';
+import FormScrollView from '../components/FormScrollView';
 import { router, useFocusEffect } from 'expo-router';
 import { useAutoSave } from '../lib/useDraft';
 import { addFirearm, resolveImageUri, getAllFirearms, getAllSuppressors, getAllNfaTrusts, getNfaTrustById, setFirearmAtfForm } from '../lib/database';
@@ -83,6 +84,7 @@ export default function AddFirearm() {
   const [dealerCityState, setDealerCityState] = useState('');
   const [storageLocation, setStorageLocation] = useState('');
   const [roundCount, setRoundCount] = useState('');
+  const [ownershipType, setOwnershipType] = useState<'personal' | 'business'>('personal');
   const [notes, setNotes] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
   // NFA
@@ -114,14 +116,14 @@ export default function AddFirearm() {
     nickname, make, model, caliber, serialNumber, selectedTypes, actionType,
     triggerType, purchaseDate, purchasePrice, currentValue, selectedCondition,
     acquisitionMethod, purchasedFrom, dealerCityState, storageLocation,
-    roundCount, notes, isNfa, nfaFormType, nfaCategories, atfStatus,
+    roundCount, ownershipType, notes, isNfa, nfaFormType, nfaCategories, atfStatus,
     atfControlNumber, dateFiled, dateApproved, taxPaid, trustType, trustName,
     responsiblePersons, trustId,
   }), [
     nickname, make, model, caliber, serialNumber, selectedTypes, actionType,
     triggerType, purchaseDate, purchasePrice, currentValue, selectedCondition,
     acquisitionMethod, purchasedFrom, dealerCityState, storageLocation,
-    roundCount, notes, isNfa, nfaFormType, nfaCategories, atfStatus,
+    roundCount, ownershipType, notes, isNfa, nfaFormType, nfaCategories, atfStatus,
     atfControlNumber, dateFiled, dateApproved, taxPaid, trustType, trustName,
     responsiblePersons, trustId,
   ]);
@@ -146,6 +148,7 @@ export default function AddFirearm() {
     setDealerCityState(restored.dealerCityState ?? '');
     setStorageLocation(restored.storageLocation ?? '');
     setRoundCount(restored.roundCount ?? '');
+    setOwnershipType(restored.ownershipType ?? 'personal');
     setNotes(restored.notes ?? '');
     setIsNfa(restored.isNfa ?? false);
     setNfaFormType(restored.nfaFormType ?? '');
@@ -663,6 +666,7 @@ export default function AddFirearm() {
       dealer_city_state: dealerCityState.trim() || undefined,
       storage_location: storageLocation.trim() || undefined,
       round_count: roundCount ? parseInt(roundCount) : 0,
+      ownership_type: ownershipType,
       value_last_updated: currentValue ? now : undefined,
       is_nfa: isNfa ? 1 : 0,
       nfa_form_type: nfaFormType || undefined,
@@ -705,22 +709,18 @@ export default function AddFirearm() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={styles.cancel}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>Add Firearm</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={styles.save}>Save</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-        >
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={styles.cancel}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>Add Firearm</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={styles.save}>Save</Text>
+        </TouchableOpacity>
+      </View>
+      <FormScrollView
+        contentContainerStyle={styles.scroll}
+      >
           <TouchableOpacity style={styles.photoBox} onPress={pickImage} activeOpacity={0.8}>
             {imageUri ? (
               <View style={{ flex: 1 }}>
@@ -827,6 +827,19 @@ export default function AddFirearm() {
             ))}
           </View>
 
+          <Text style={styles.sectionLabel}>OWNERSHIP</Text>
+          <View style={styles.chipRow}>
+            {(['personal', 'business'] as const).map((o) => (
+              <TouchableOpacity key={o}
+                style={[styles.chip, ownershipType === o && styles.chipActive]}
+                onPress={() => setOwnershipType(o)}>
+                <Text style={[styles.chipText, ownershipType === o && styles.chipTextActive]}>
+                  {o === 'personal' ? 'Personal' : 'Business / FFL'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <Text style={styles.sectionLabel}>ACQUISITION</Text>
           <View style={styles.chipRow}>
             {ACQUISITION_METHODS.map((m) => (
@@ -871,6 +884,19 @@ export default function AddFirearm() {
               onPress={() => setCurrentValue(purchasePrice)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={styles.linkBtnText}>Use purchase price as current value</Text>
+            </TouchableOpacity>
+          ) : null}
+          {(make || model) ? (
+            <TouchableOpacity
+              style={styles.linkBtn}
+              onPress={() => {
+                const q = encodeURIComponent(`${make} ${model}`.trim());
+                Linking.openURL(`https://truegunvalue.com/search?q=${q}`).catch(() =>
+                  Linking.openURL(`https://www.google.com/search?q=site:truegunvalue.com+${q}`)
+                );
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={[styles.linkBtnText, { color: '#4A90D9' }]}>Look up on TrueGunValue ›</Text>
             </TouchableOpacity>
           ) : null}
 
@@ -1014,8 +1040,7 @@ export default function AddFirearm() {
               multiline numberOfLines={4} textAlignVertical="top" />
           </View>
           <View style={{ height: 120 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }

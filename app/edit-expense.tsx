@@ -3,16 +3,14 @@ import {
   View,
   Text,
   TextInput,
-  ScrollView,
-  KeyboardAvoidingView,
   TouchableOpacity,
-  Platform,
   Alert,
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { getExpenseById, updateExpense, getAllFirearms, Firearm, EXPENSE_CATEGORIES } from '../lib/database';
+import FormScrollView from '../components/FormScrollView';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -105,23 +103,19 @@ export default function EditExpenseScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardAvoid}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Edit Expense</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={styles.saveText}>Save</Text>
-          </TouchableOpacity>
-        </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={styles.cancelText}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Edit Expense</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={styles.saveText}>Save</Text>
+        </TouchableOpacity>
+      </View>
 
-        {/* Content */}
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      {/* Content */}
+      <FormScrollView style={styles.content}>
           {/* Expense Details Section */}
           <Text style={styles.sectionLabel}>EXPENSE DETAILS</Text>
           <View style={styles.card}>
@@ -239,8 +233,7 @@ export default function EditExpenseScreen() {
           </View>
 
           <View style={styles.bottomSpacer} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }

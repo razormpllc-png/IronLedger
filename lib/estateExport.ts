@@ -19,9 +19,20 @@ import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
 import { Share } from 'react-native';
 import {
-  getAllFirearms, getAllSuppressors, getAllNfaTrusts, formatDate,
-  type Firearm, type Suppressor, type NfaTrust,
+  getAllFirearms, getAllSuppressors, getAllNfaTrusts, getAllAmmo, formatDate,
+  type Firearm, type Suppressor, type NfaTrust, type Ammo,
 } from './database';
+
+/** Categories the user can toggle on the config screen. */
+export interface EstateExportOptions {
+  includeFirearms: boolean;
+  includeSuppressors: boolean;
+  includeAmmo: boolean;
+  /** IDs to exclude (unchecked in the item picker). */
+  excludeFirearmIds?: Set<number>;
+  excludeSuppressorIds?: Set<number>;
+  excludeAmmoIds?: Set<number>;
+}
 
 // HTML-escape user-provided strings so serials, notes, etc. can't break
 // the generated markup or inject tags.
@@ -196,7 +207,7 @@ function renderBucket(bucket: LocationBucket, trusts: Map<number, NfaTrust>): st
   `;
 }
 
-function buildHtml(buckets: LocationBucket[], trusts: NfaTrust[]): string {
+function buildHtml(buckets: LocationBucket[], trusts: NfaTrust[], ammoSection: string = ''): string {
   const today = new Date();
   const todayStr = today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   const trustMap = new Map(trusts.map(t => [t.id, t]));
@@ -300,9 +311,11 @@ function buildHtml(buckets: LocationBucket[], trusts: NfaTrust[]): string {
     </div>
   </div>
 
-  ${buckets.length === 0
+  ${buckets.length === 0 && !ammoSection
     ? `<div class="empty">No firearms or suppressors on file.</div>`
     : sections}
+
+  ${ammoSection}
 
   <div class="footer">
     <b>About this document:</b> This estate export lists every firearm and suppressor tracked in
@@ -327,19 +340,68 @@ function buildHtml(buckets: LocationBucket[], trusts: NfaTrust[]): string {
  * the native share sheet. Returns a success/failure sentinel so the
  * caller can decide what to alert.
  */
-export async function generateEstateExport(): Promise<
+/** Render an ammo inventory section for the estate export. */
+function renderAmmoSection(ammoList: Ammo[]): string {
+  if (ammoList.length === 0) return '';
+  const rows = ammoList.map(a => {
+    const name = esc(`${a.brand ?? ''} ${a.caliber ?? ''} ${a.grain ? a.grain + 'gr' : ''}`.trim() || 'Unknown');
+    return `<tr>
+      <td class="v">${name}</td>
+      <td class="v">${dashOr(a.caliber)}</td>
+      <td class="v">${dashOr(a.brand)}</td>
+      <td class="num">${a.grain ?? '—'}</td>
+      <td class="num">${a.quantity?.toLocaleString() ?? '—'}</td>
+      <td class="v">${dashOr(a.lot_number)}</td>
+      <td class="v">${a.is_handload ? 'Handload' : 'Factory'}</td>
+    </tr>`;
+  }).join('');
+  const totalQty = ammoList.reduce((n, a) => n + (a.quantity ?? 0), 0);
+  return `
+    <section class="bucket">
+      <div class="bucket-header">
+        <h2>Ammunition Inventory</h2>
+        <span class="bucket-count">${ammoList.length} type${ammoList.length === 1 ? '' : 's'}, ${totalQty.toLocaleString()} total rounds</span>
+      </div>
+      <table class="main">
+        <thead><tr>
+          <th>Description</th><th>Caliber</th><th>Brand</th>
+          <th class="num">Grain</th><th class="num">Qty</th><th>Lot #</th><th>Type</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </section>`;
+}
+
+export async function generateEstateExport(opts?: EstateExportOptions): Promise<
   { ok: true; uri: string } | { ok: false; reason: 'empty' | 'share-unavailable' }
 > {
-  const firearms = getAllFirearms();
-  const suppressors = getAllSuppressors();
+  const options: EstateExportOptions = opts ?? {
+    includeFirearms: true, includeSuppressors: true, includeAmmo: false,
+  };
+
+  let firearms = options.includeFirearms ? getAllFirearms() : [];
+  let suppressors = options.includeSuppressors ? getAllSuppressors() : [];
+  let ammo = options.includeAmmo ? getAllAmmo() : [];
   const trusts = getAllNfaTrusts();
 
-  if (firearms.length === 0 && suppressors.length === 0) {
+  // Apply per-item exclusions
+  if (options.excludeFirearmIds?.size) {
+    firearms = firearms.filter(f => !options.excludeFirearmIds!.has(f.id));
+  }
+  if (options.excludeSuppressorIds?.size) {
+    suppressors = suppressors.filter(s => !options.excludeSuppressorIds!.has(s.id));
+  }
+  if (options.excludeAmmoIds?.size) {
+    ammo = ammo.filter(a => !options.excludeAmmoIds!.has(a.id));
+  }
+
+  if (firearms.length === 0 && suppressors.length === 0 && ammo.length === 0) {
     return { ok: false, reason: 'empty' };
   }
 
   const buckets = buildBuckets(firearms, suppressors);
-  const html = buildHtml(buckets, trusts);
+  const ammoHtml = renderAmmoSection(ammo);
+  const html = buildHtml(buckets, trusts, ammoHtml);
 
   const { uri } = await Print.printToFileAsync({ html, base64: false });
 

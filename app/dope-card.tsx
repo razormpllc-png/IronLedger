@@ -9,11 +9,12 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, TextInput, ScrollView, KeyboardAvoidingView,
-  TouchableOpacity, Platform, Alert, StyleSheet,
+  View, Text, TextInput,
+  TouchableOpacity, Alert, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import * as Location from 'expo-location';
 import {
   getAllFirearms, getDopeCardById,
   insertDopeCard, updateDopeCard,
@@ -21,6 +22,44 @@ import {
 } from '../lib/database';
 import { useAutoSave } from '../lib/useDraft';
 import SuggestionRow from '../components/SuggestionRow';
+import FormScrollView from '../components/FormScrollView';
+
+// Uses Open-Meteo (free, no API key required) for current weather.
+async function fetchWeather(lat: number, lon: number): Promise<{
+  temp: string; humidity: string; wind: string; conditions: string;
+} | null> {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const c = data.current;
+    if (!c) return null;
+
+    const windDir = (() => {
+      const d = c.wind_direction_10m ?? 0;
+      const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      return dirs[Math.round(d / 45) % 8];
+    })();
+
+    const wmo: Record<number, string> = {
+      0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast',
+      45: 'Foggy', 48: 'Rime fog', 51: 'Light drizzle', 53: 'Drizzle',
+      55: 'Heavy drizzle', 61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
+      71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 80: 'Rain showers',
+      81: 'Moderate showers', 82: 'Heavy showers', 95: 'Thunderstorm',
+    };
+
+    return {
+      temp: `${Math.round(c.temperature_2m)}°F`,
+      humidity: `${Math.round(c.relative_humidity_2m)}%`,
+      wind: `${Math.round(c.wind_speed_10m)} mph ${windDir}`,
+      conditions: wmo[c.weather_code] ?? 'Unknown',
+    };
+  } catch {
+    return null;
+  }
+}
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -45,6 +84,7 @@ export default function DopeCardScreen() {
   const [scope, setScope] = useState('');
   const [conditions, setConditions] = useState('');
   const [saving, setSaving] = useState(false);
+  const [weatherLoading, setWeatherLoading] = useState(false);
 
   // ── Auto-save draft ──────────────────────────────────────
   // For new cards, use 'dope-card'; for editing, use 'dope-card-' + ID
@@ -98,6 +138,29 @@ export default function DopeCardScreen() {
 
   function firearmLabel(f: Firearm): string {
     return f.nickname?.trim() || `${f.make} ${f.model}`.trim() || `Firearm #${f.id}`;
+  }
+
+  async function pullWeather() {
+    try {
+      setWeatherLoading(true);
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Location Permission', 'Enable location access to auto-fill weather.');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const wx = await fetchWeather(loc.coords.latitude, loc.coords.longitude);
+      if (wx) {
+        const line = `${wx.temp}, ${wx.humidity} humidity, ${wx.wind}, ${wx.conditions}`;
+        setConditions((prev) => prev.trim() ? `${prev.trim()}\n${line}` : line);
+      } else {
+        Alert.alert('Weather Unavailable', 'Could not fetch weather data. Enter it manually.');
+      }
+    } catch {
+      Alert.alert('Error', 'Could not get your location for weather.');
+    } finally {
+      setWeatherLoading(false);
+    }
   }
 
   function handleSave() {
@@ -169,29 +232,22 @@ export default function DopeCardScreen() {
 
   return (
     <SafeAreaView style={s.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
-        <View style={s.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={s.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={s.headerTitle}>{headerTitle}</Text>
-          <TouchableOpacity onPress={handleSave} disabled={saving}>
-            <Text style={[s.saveText, saving && { opacity: 0.5 }]}>
-              {existing ? 'Update' : 'Save'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={s.cancelText}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={s.headerTitle}>{headerTitle}</Text>
+        <TouchableOpacity onPress={handleSave} disabled={saving}>
+          <Text style={[s.saveText, saving && { opacity: 0.5 }]}>
+            {existing ? 'Update' : 'Save'}
+          </Text>
+        </TouchableOpacity>
+      </View>
 
-        <ScrollView
-          style={s.content}
-          contentContainerStyle={{ paddingBottom: 120 }}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-        >
+      <FormScrollView
+        style={s.content}
+        contentContainerStyle={{ paddingBottom: 120 }}
+      >
           <Text style={s.sectionLabel}>FIREARM</Text>
           <View style={s.card}>
             {firearms.map((f, i) => (
@@ -291,7 +347,16 @@ export default function DopeCardScreen() {
             <SuggestionRow source="accessory_make" query={scope} onPick={setScope} />
           </View>
 
-          <Text style={s.sectionLabel}>CONDITIONS</Text>
+          <View style={s.weatherHeader}>
+            <Text style={s.sectionLabel}>CONDITIONS</Text>
+            <TouchableOpacity onPress={pullWeather} disabled={weatherLoading}>
+              {weatherLoading ? (
+                <ActivityIndicator size="small" color={GOLD} />
+              ) : (
+                <Text style={s.weatherPullBtn}>📍 Auto-Fill</Text>
+              )}
+            </TouchableOpacity>
+          </View>
           <View style={[s.card, s.notesCard]}>
             <TextInput
               style={s.notesInput}
@@ -310,8 +375,7 @@ export default function DopeCardScreen() {
           </Text>
 
           <View style={{ height: 40 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }
@@ -376,6 +440,10 @@ const s = StyleSheet.create({
     color: '#888', fontSize: 11, lineHeight: 16,
     marginTop: -10, marginBottom: 16,
   },
+  weatherHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+  },
+  weatherPullBtn: { color: GOLD, fontSize: 12, fontWeight: '700' },
   // Unused helpers kept for parity with dispose.tsx styling vocabulary.
   danger: { color: DANGER },
 });

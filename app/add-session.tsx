@@ -1,19 +1,63 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  View, Text, TextInput, ScrollView, KeyboardAvoidingView,
-  TouchableOpacity, Platform, Alert, StyleSheet, Modal,
+  View, Text, TextInput, ScrollView,
+  TouchableOpacity, Alert, StyleSheet, Modal,
+  Image, ActivityIndicator, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 import {
   addRangeSession, updateRangeSession,
   getRangeSessionById, getRangeSessionFirearms,
   getAllFirearms, getAllAmmo, getRecentRangeLocations,
-  Firearm, Ammo,
+  addRangeSessionPhoto, getRangeSessionPhotos, deleteRangeSessionPhoto,
+  resolveImageUri, Firearm, Ammo, RangeSessionPhoto,
 } from '../lib/database';
 import { useAutoSave } from '../lib/useDraft';
 import { syncWidgets } from '../lib/widgetSync';
 import SuggestionRow from '../components/SuggestionRow';
+import FormScrollView from '../components/FormScrollView';
+
+// ── Weather fetch helper ──────────────────────────────────────
+// Uses Open-Meteo (free, no API key required) for current weather.
+async function fetchWeather(lat: number, lon: number): Promise<{
+  temp: string; humidity: string; wind: string; conditions: string;
+} | null> {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const c = data.current;
+    if (!c) return null;
+
+    const windDir = (() => {
+      const d = c.wind_direction_10m ?? 0;
+      const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      return dirs[Math.round(d / 45) % 8];
+    })();
+
+    // WMO weather codes → human label
+    const wmo: Record<number, string> = {
+      0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast',
+      45: 'Foggy', 48: 'Rime fog', 51: 'Light drizzle', 53: 'Drizzle',
+      55: 'Heavy drizzle', 61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
+      71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 80: 'Rain showers',
+      81: 'Moderate showers', 82: 'Heavy showers', 95: 'Thunderstorm',
+    };
+
+    return {
+      temp: `${Math.round(c.temperature_2m)}°F`,
+      humidity: `${Math.round(c.relative_humidity_2m)}%`,
+      wind: `${Math.round(c.wind_speed_10m)} mph ${windDir}`,
+      conditions: wmo[c.weather_code] ?? 'Unknown',
+    };
+  } catch {
+    return null;
+  }
+}
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -72,6 +116,22 @@ export default function AddSessionScreen() {
   const [date, setDate] = useState(todayDisplay());
   const [location, setLocation] = useState('');
   const [weather, setWeather] = useState('');
+  const [sessionType, setSessionType] = useState<'indoor' | 'outdoor'>('outdoor');
+  const [temperature, setTemperature] = useState('');
+  const [humidity, setHumidity] = useState('');
+  const [wind, setWind] = useState('');
+  const [conditions, setConditions] = useState('');
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  // Competition / PractiScore fields
+  const [matchName, setMatchName] = useState('');
+  const [matchUrl, setMatchUrl] = useState('');
+  const [division, setDivision] = useState('');
+  const [classification, setClassification] = useState('');
+  const [placement, setPlacement] = useState('');
+  const [matchScore, setMatchScore] = useState('');
+  const [showMatch, setShowMatch] = useState(false);
+  // Photos
+  const [photos, setPhotos] = useState<RangeSessionPhoto[]>([]);
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<Line[]>([
     { key: makeLineKey(), firearm_id: null, ammo_id: null, rounds_fired: '', notes: '' },
@@ -89,9 +149,11 @@ export default function AddSessionScreen() {
 
   // ── Auto-save draft ──────────────────────────────────────
   const formSnapshot = useMemo(() => ({
-    date, location, weather, notes,
+    date, location, weather, sessionType, temperature, humidity, wind, conditions,
+    matchName, matchUrl, division, classification, placement, matchScore, showMatch, notes,
   }), [
-    date, location, weather, notes,
+    date, location, weather, sessionType, temperature, humidity, wind, conditions,
+    matchName, matchUrl, division, classification, placement, matchScore, showMatch, notes,
   ]);
   const { restored, clearDraft } = useAutoSave('add-session', formSnapshot);
 
@@ -100,6 +162,18 @@ export default function AddSessionScreen() {
     setDate(restored.date ?? todayDisplay());
     setLocation(restored.location ?? '');
     setWeather(restored.weather ?? '');
+    setSessionType(restored.sessionType ?? 'outdoor');
+    setTemperature(restored.temperature ?? '');
+    setHumidity(restored.humidity ?? '');
+    setWind(restored.wind ?? '');
+    setConditions(restored.conditions ?? '');
+    setMatchName(restored.matchName ?? '');
+    setMatchUrl(restored.matchUrl ?? '');
+    setDivision(restored.division ?? '');
+    setClassification(restored.classification ?? '');
+    setPlacement(restored.placement ?? '');
+    setMatchScore(restored.matchScore ?? '');
+    setShowMatch(restored.showMatch ?? false);
     setNotes(restored.notes ?? '');
   }, [restored]);
 
@@ -115,7 +189,20 @@ export default function AddSessionScreen() {
           setDate(fromIsoDate(session.session_date));
           setLocation(session.location ?? '');
           setWeather(session.weather ?? '');
+          setSessionType((session.session_type as 'indoor' | 'outdoor') ?? 'outdoor');
+          setTemperature(session.temperature ?? '');
+          setHumidity(session.humidity ?? '');
+          setWind(session.wind ?? '');
+          setConditions(session.conditions ?? '');
+          setMatchName(session.match_name ?? '');
+          setMatchUrl(session.match_url ?? '');
+          setDivision(session.division ?? '');
+          setClassification(session.classification ?? '');
+          setPlacement(session.placement ?? '');
+          setMatchScore(session.match_score ?? '');
+          setShowMatch(!!(session.match_name || session.match_url));
           setNotes(session.notes ?? '');
+          setPhotos(getRangeSessionPhotos(editingId));
           const existingLines = getRangeSessionFirearms(editingId);
           if (existingLines.length > 0) {
             setLines(existingLines.map(l => ({
@@ -193,6 +280,71 @@ export default function AddSessionScreen() {
     return match.length > 0 ? match : ammoLots;
   }
 
+  // ── Weather auto-pull ────────────────────────────────────
+  async function pullWeather() {
+    setWeatherLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Location Permission', 'Enable location access to auto-fill weather.');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const wx = await fetchWeather(loc.coords.latitude, loc.coords.longitude);
+      if (wx) {
+        setTemperature(wx.temp);
+        setHumidity(wx.humidity);
+        setWind(wx.wind);
+        setConditions(wx.conditions);
+        setWeather(`${wx.conditions} · ${wx.temp}`);
+      } else {
+        Alert.alert('Weather Unavailable', 'Could not fetch weather data. Enter it manually.');
+      }
+    } catch {
+      Alert.alert('Error', 'Could not get your location for weather.');
+    } finally {
+      setWeatherLoading(false);
+    }
+  }
+
+  // ── Photo handling ──────────────────────────────────────
+  async function handleAddPhoto() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    const uri = result.assets[0].uri;
+    if (isEdit && editingId != null) {
+      // Save directly to DB for existing sessions
+      addRangeSessionPhoto({ session_id: editingId, image_uri: uri });
+      setPhotos(getRangeSessionPhotos(editingId));
+    } else {
+      // For new sessions, hold in local state — will save after session insert
+      setPhotos(prev => [...prev, {
+        id: Date.now(), session_id: 0, image_uri: uri,
+        caption: null, sort_order: prev.length, created_at: '',
+      }]);
+    }
+  }
+
+  function handleDeletePhoto(photo: RangeSessionPhoto) {
+    Alert.alert('Delete Photo?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: () => {
+          if (isEdit && editingId != null) {
+            deleteRangeSessionPhoto(photo.id);
+            setPhotos(getRangeSessionPhotos(editingId));
+          } else {
+            setPhotos(prev => prev.filter(p => p.id !== photo.id));
+          }
+        },
+      },
+    ]);
+  }
+
   function validate(): string | null {
     if (!date.trim()) return 'Date is required';
     const cleanedLines = lines.filter(l => l.firearm_id != null || l.rounds_fired.trim());
@@ -226,13 +378,28 @@ export default function AddSessionScreen() {
       location: location.trim() || null,
       weather: weather.trim() || null,
       notes: notes.trim() || null,
+      session_type: sessionType,
+      temperature: temperature.trim() || null,
+      humidity: humidity.trim() || null,
+      wind: wind.trim() || null,
+      conditions: conditions.trim() || null,
+      match_name: matchName.trim() || null,
+      match_url: matchUrl.trim() || null,
+      division: division.trim() || null,
+      classification: classification.trim() || null,
+      placement: placement.trim() || null,
+      match_score: matchScore.trim() || null,
     };
 
     try {
       if (isEdit && editingId != null) {
         updateRangeSession(editingId, sessionPayload, cleanedLines);
       } else {
-        addRangeSession(sessionPayload, cleanedLines);
+        const newId = addRangeSession(sessionPayload, cleanedLines);
+        // Save locally-held photos for the new session
+        for (const p of photos) {
+          addRangeSessionPhoto({ session_id: newId, image_uri: p.image_uri });
+        }
       }
       syncWidgets();
       clearDraft();
@@ -251,10 +418,6 @@ export default function AddSessionScreen() {
 
   return (
     <SafeAreaView style={s.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
         <View style={s.header}>
           <TouchableOpacity onPress={() => router.back()}>
             <Text style={s.cancelText}>Cancel</Text>
@@ -265,11 +428,9 @@ export default function AddSessionScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView
+        <FormScrollView
           style={s.content}
           contentContainerStyle={{ paddingBottom: 120 }}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
         >
           <Text style={s.sectionLabel}>TRIP</Text>
           <View style={s.card}>
@@ -285,12 +446,6 @@ export default function AddSessionScreen() {
               value={location}
               onChange={setLocation}
               placeholder="Range name"
-            />
-            <Row
-              label="Weather"
-              value={weather}
-              onChange={setWeather}
-              placeholder="Sunny · 72°"
               last
             />
           </View>
@@ -311,6 +466,46 @@ export default function AddSessionScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+          ) : null}
+
+          {/* Indoor / Outdoor toggle */}
+          <Text style={s.sectionLabel}>SESSION TYPE</Text>
+          <View style={s.card}>
+            <View style={s.typeToggleRow}>
+              {(['indoor', 'outdoor'] as const).map((t) => (
+                <TouchableOpacity
+                  key={t}
+                  style={[s.typeToggle, sessionType === t && s.typeToggleActive]}
+                  onPress={() => setSessionType(t)}
+                >
+                  <Text style={[s.typeToggleText, sessionType === t && s.typeToggleTextActive]}>
+                    {t === 'indoor' ? '🏢 Indoor' : '🌤 Outdoor'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* Weather — shown for outdoor sessions */}
+          {sessionType === 'outdoor' ? (
+            <>
+              <View style={s.weatherHeader}>
+                <Text style={s.sectionLabel}>WEATHER</Text>
+                <TouchableOpacity onPress={pullWeather} disabled={weatherLoading}>
+                  {weatherLoading ? (
+                    <ActivityIndicator size="small" color={GOLD} />
+                  ) : (
+                    <Text style={s.weatherPullBtn}>📍 Auto-Fill</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+              <View style={s.card}>
+                <Row label="Conditions" value={conditions} onChange={setConditions} placeholder="Clear, Overcast, Rain…" />
+                <Row label="Temp" value={temperature} onChange={setTemperature} placeholder="72°F" />
+                <Row label="Humidity" value={humidity} onChange={setHumidity} placeholder="45%" />
+                <Row label="Wind" value={wind} onChange={setWind} placeholder="5 mph NW" last />
+              </View>
+            </>
           ) : null}
 
           <Text style={s.sectionLabel}>FIREARMS SHOT</Text>
@@ -378,6 +573,59 @@ export default function AddSessionScreen() {
             <Text style={s.addLineText}>＋ Add Firearm</Text>
           </TouchableOpacity>
 
+          {/* Competition / Match section — collapsible */}
+          <TouchableOpacity
+            style={s.matchToggle}
+            onPress={() => setShowMatch(!showMatch)}
+            activeOpacity={0.7}
+          >
+            <Text style={s.sectionLabel}>COMPETITION / MATCH</Text>
+            <Text style={s.matchToggleChev}>{showMatch ? '▾' : '▸'}</Text>
+          </TouchableOpacity>
+          {showMatch ? (
+            <View style={s.card}>
+              <Row label="Match" value={matchName} onChange={setMatchName} placeholder="Match name" />
+              <Row label="Link" value={matchUrl} onChange={setMatchUrl} placeholder="PractiScore URL" />
+              <Row label="Division" value={division} onChange={setDivision} placeholder="e.g. Production, Open" />
+              <Row label="Class" value={classification} onChange={setClassification} placeholder="e.g. A, B, M, GM" />
+              <Row label="Place" value={placement} onChange={setPlacement} placeholder="e.g. 3rd of 45" />
+              <Row label="Score" value={matchScore} onChange={setMatchScore} placeholder="e.g. 87.5%" last />
+            </View>
+          ) : null}
+
+          {/* Photos */}
+          <View style={s.weatherHeader}>
+            <Text style={s.sectionLabel}>PHOTOS</Text>
+            <TouchableOpacity onPress={handleAddPhoto}>
+              <Text style={s.weatherPullBtn}>＋ Add</Text>
+            </TouchableOpacity>
+          </View>
+          {photos.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.photoStrip}
+            >
+              {photos.map((photo) => (
+                <TouchableOpacity
+                  key={photo.id}
+                  style={s.photoTile}
+                  onLongPress={() => handleDeletePhoto(photo)}
+                  activeOpacity={0.8}
+                >
+                  <Image
+                    source={{ uri: resolveImageUri(photo.image_uri) ?? photo.image_uri }}
+                    style={s.photoImage}
+                  />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : (
+            <TouchableOpacity style={s.photoEmpty} onPress={handleAddPhoto}>
+              <Text style={s.photoEmptyText}>Tap to add session photos</Text>
+            </TouchableOpacity>
+          )}
+
           <Text style={s.sectionLabel}>TRIP NOTES</Text>
           <View style={s.card}>
             <View style={s.notesContainer}>
@@ -401,7 +649,7 @@ export default function AddSessionScreen() {
               </Text>
             </View>
           ) : null}
-        </ScrollView>
+        </FormScrollView>
 
         {/* Firearm / ammo picker modal — shared by both kinds, filtered in
             the options list for ammo based on the line's firearm caliber. */}
@@ -458,7 +706,6 @@ export default function AddSessionScreen() {
             </View>
           </View>
         </Modal>
-      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -586,4 +833,34 @@ const s = StyleSheet.create({
   modalBtn: { paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 10 },
   modalBtnGhost: { backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER },
   modalBtnGhostText: { color: '#CCCCCC', fontSize: 15, fontWeight: '600' },
+  // Session type toggle
+  typeToggleRow: { flexDirection: 'row', gap: 8, padding: 12 },
+  typeToggle: {
+    flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+    backgroundColor: BG, borderWidth: 1, borderColor: BORDER,
+  },
+  typeToggleActive: { backgroundColor: 'rgba(201,168,76,0.12)', borderColor: GOLD },
+  typeToggleText: { color: MUTED, fontSize: 14, fontWeight: '600' },
+  typeToggleTextActive: { color: GOLD, fontWeight: '700' },
+  // Weather header with auto-fill button
+  weatherHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 10, marginTop: 8,
+  },
+  weatherPullBtn: { color: GOLD, fontSize: 12, fontWeight: '700' },
+  // Competition toggle
+  matchToggle: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 10, marginTop: 8,
+  },
+  matchToggleChev: { color: GOLD, fontSize: 14 },
+  // Photos
+  photoStrip: { gap: 8, marginBottom: 16 },
+  photoTile: { width: 100, height: 100, borderRadius: 8, overflow: 'hidden' },
+  photoImage: { width: '100%', height: '100%' },
+  photoEmpty: {
+    backgroundColor: SURFACE, borderRadius: 8, borderWidth: 1, borderColor: BORDER,
+    paddingVertical: 24, alignItems: 'center', marginBottom: 16,
+  },
+  photoEmptyText: { color: MUTED, fontSize: 13 },
 });

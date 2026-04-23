@@ -201,7 +201,9 @@ export default function SuppressorDetail() {
           <DetailRow label="Length" value={suppressor.length_inches ? `${suppressor.length_inches} in` : null} />
           <DetailRow label="Weight" value={suppressor.weight_oz ? `${suppressor.weight_oz} oz` : null} />
           <DetailRow label="Thread Pitch" value={suppressor.thread_pitch} />
-          <DetailRow label="Mount" value={suppressor.mount_type ? MOUNT_TYPE_LABELS[suppressor.mount_type] ?? suppressor.mount_type : null} last />
+          <DetailRow label="Mount" value={suppressor.mount_type ? MOUNT_TYPE_LABELS[suppressor.mount_type] ?? suppressor.mount_type : null} />
+          <DetailRow label="End Cap" value={suppressor.end_cap_type} />
+          <DetailRow label="End Cap Notes" value={suppressor.end_cap_notes} last />
         </View>
 
         <Text style={s.sectionLabel}>PURCHASE</Text>

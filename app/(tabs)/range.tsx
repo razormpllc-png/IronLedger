@@ -14,12 +14,21 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
-  getAllRangeSessions, deleteRangeSession, formatDate,
+  getAllRangeSessions, deleteRangeSession, formatDate, formatDateShort,
   getAllDopeCards, deleteDopeCard,
-  RangeSessionWithStats, DopeCardWithMeta,
+  getAllCompetitionMatches, deleteCompetitionMatch,
+  RangeSessionWithStats, DopeCardWithMeta, CompetitionMatchWithMeta,
 } from '../../lib/database';
 import { syncWidgets } from '../../lib/widgetSync';
 import { runProGated } from '../../lib/paywall';
+
+// Match type accent colors (same as match detail screen).
+const MATCH_TYPE_COLORS: Record<string, string> = {
+  USPSA: '#4A90D9',
+  IDPA: '#D4912A',
+  'Steel Challenge': '#8E6FBF',
+  Outlaw: '#5DAF5D',
+};
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -27,7 +36,7 @@ const CARD = '#1A1A1A';
 const BORDER = '#2A2A2A';
 const MUTED = '#555555';
 
-type Segment = 'sessions' | 'dope';
+type Segment = 'sessions' | 'dope' | 'matches';
 
 function SessionCard({
   item, onPress, onLongPress,
@@ -119,16 +128,68 @@ function DopeCardRow({
   );
 }
 
+function MatchCard({
+  item, onPress, onLongPress,
+}: {
+  item: CompetitionMatchWithMeta;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
+  const typeColor = MATCH_TYPE_COLORS[item.match_type] ?? MUTED;
+  return (
+    <TouchableOpacity
+      style={s.card}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      activeOpacity={0.75}
+    >
+      <View style={s.cardIcon}>
+        <Text style={s.cardIconText}>🏆</Text>
+      </View>
+      <View style={s.cardBody}>
+        <Text style={s.cardDate} numberOfLines={1}>{item.match_name}</Text>
+        <Text style={s.cardLocation} numberOfLines={1}>
+          {formatDate(item.match_date) ?? item.match_date}
+          {item.location ? ` · ${item.location}` : ''}
+        </Text>
+        <View style={s.metaRow}>
+          <View style={[s.metaPill, { backgroundColor: typeColor + '22' }]}>
+            <Text style={[s.metaPillText, { color: typeColor }]}>{item.match_type}</Text>
+          </View>
+          {item.division ? (
+            <View style={s.metaPill}>
+              <Text style={s.metaPillText}>{item.division}</Text>
+            </View>
+          ) : null}
+          {item.overall_placement != null ? (
+            <View style={s.metaPill}>
+              <Text style={s.metaPillText}>#{item.overall_placement} Overall</Text>
+            </View>
+          ) : null}
+          {item.stage_count > 0 ? (
+            <View style={s.metaPill}>
+              <Text style={s.metaPillText}>{item.stage_count} stages</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+      <Text style={s.chevron}>›</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function RangeScreen() {
   const router = useRouter();
   const [segment, setSegment] = useState<Segment>('sessions');
   const [sessions, setSessions] = useState<RangeSessionWithStats[]>([]);
   const [dopeCards, setDopeCards] = useState<DopeCardWithMeta[]>([]);
+  const [matches, setMatches] = useState<CompetitionMatchWithMeta[]>([]);
 
   useFocusEffect(
     useCallback(() => {
       setSessions(getAllRangeSessions());
       setDopeCards(getAllDopeCards());
+      setMatches(getAllCompetitionMatches());
     }, [])
   );
 
@@ -167,9 +228,30 @@ export default function RangeScreen() {
     );
   }
 
+  function handleDeleteMatch(match: CompetitionMatchWithMeta) {
+    Alert.alert(
+      'Delete match?',
+      `This removes "${match.match_name}" and all stage scores. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete', style: 'destructive',
+          onPress: () => {
+            deleteCompetitionMatch(match.id);
+            setMatches(getAllCompetitionMatches());
+          },
+        },
+      ],
+    );
+  }
+
   function handleFab() {
     if (segment === 'sessions') {
       router.push('/add-session');
+      return;
+    }
+    if (segment === 'matches') {
+      runProGated('competition', () => router.push('/add-match'));
       return;
     }
     // DOPE card creation is Pro-gated. Viewing existing cards stays free
@@ -193,7 +275,9 @@ export default function RangeScreen() {
         <Text style={s.countText}>
           {segment === 'sessions'
             ? `${sessions.length} ${sessions.length === 1 ? 'Session' : 'Sessions'}`
-            : `${dopeCards.length} ${dopeCards.length === 1 ? 'Card' : 'Cards'}`}
+            : segment === 'dope'
+            ? `${dopeCards.length} ${dopeCards.length === 1 ? 'Card' : 'Cards'}`
+            : `${matches.length} ${matches.length === 1 ? 'Match' : 'Matches'}`}
         </Text>
       </View>
 
@@ -208,6 +292,11 @@ export default function RangeScreen() {
           active={segment === 'dope'}
           onPress={() => setSegment('dope')}
         />
+        <SegmentButton
+          label="Matches"
+          active={segment === 'matches'}
+          onPress={() => setSegment('matches')}
+        />
       </View>
 
       {segment === 'sessions' ? (
@@ -217,7 +306,7 @@ export default function RangeScreen() {
               <Stat label="Total Rounds" value={totalRounds.toLocaleString()} />
               <Stat
                 label="Last Trip"
-                value={lastSession ? (formatDate(lastSession) ?? lastSession) : '—'}
+                value={lastSession ? (formatDateShort(lastSession) ?? lastSession) : '—'}
               />
               <Stat label="Sessions" value={String(sessions.length)} />
             </View>
@@ -246,7 +335,7 @@ export default function RangeScreen() {
             />
           )}
         </>
-      ) : (
+      ) : segment === 'dope' ? (
         <>
           {dopeCards.length === 0 ? (
             <View style={s.emptyState}>
@@ -266,6 +355,32 @@ export default function RangeScreen() {
                   item={item}
                   onPress={() => router.push(`/dope/${item.id}`)}
                   onLongPress={() => handleDeleteDope(item)}
+                />
+              )}
+              contentContainerStyle={s.list}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {matches.length === 0 ? (
+            <View style={s.emptyState}>
+              <Text style={s.emptyIcon}>🏆</Text>
+              <Text style={s.emptyTitle}>No matches yet</Text>
+              <Text style={s.emptySubtitle}>
+                Log USPSA, IDPA, Steel Challenge, and outlaw matches
+                with per-stage scores and placement.
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={matches}
+              keyExtractor={(item) => String(item.id)}
+              renderItem={({ item }) => (
+                <MatchCard
+                  item={item}
+                  onPress={() => router.push(`/match/${item.id}`)}
+                  onLongPress={() => handleDeleteMatch(item)}
                 />
               )}
               contentContainerStyle={s.list}

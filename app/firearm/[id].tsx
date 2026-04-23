@@ -1,9 +1,9 @@
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Image, ImageBackground,
-  Modal, TextInput, KeyboardAvoidingView, Platform,
+  Modal, TextInput, KeyboardAvoidingView, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
   getFirearmById, deleteFirearm, getMaintenanceLogs, getAccessoriesByFirearm,
@@ -28,6 +28,7 @@ import {
   isAvailable as maintenanceNotificationsAvailable,
 } from '../../lib/maintenanceNotifications';
 import { runProGated } from '../../lib/paywall';
+import { generateAndShareBillOfSale, type BillOfSaleData } from '../../lib/billOfSale';
 import { bucketFor, dueLabel, parseDateLoose } from '../../lib/batteryStats';
 import type { BatteryBucket } from '../../lib/batteryStats';
 import { markAccessoryBatteryReplacedToday } from '../../lib/accessoryBatterySync';
@@ -246,6 +247,34 @@ export default function FirearmDetail() {
   // transferred/sold/etc. Drives both the "DISPOSED" pill in the header and
   // the dedicated disposition card surfaced below the core details.
   const [disposition, setDisposition] = useState<Disposition | null>(null);
+  // Full-screen image viewer state
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
+
+  async function handleBillOfSale() {
+    if (!firearm || !disposition) return;
+    try {
+      const data: BillOfSaleData = {
+        make: firearm.make ?? undefined,
+        model: firearm.model ?? undefined,
+        serialNumber: firearm.serial_number ?? undefined,
+        caliber: firearm.caliber ?? undefined,
+        type: firearm.type ?? undefined,
+        condition: firearm.condition ?? undefined,
+        buyerName: disposition.to_name ?? undefined,
+        buyerAddress: disposition.to_address ?? undefined,
+        buyerFfl: disposition.to_ffl_number ?? undefined,
+        dispositionDate: disposition.disposition_date ?? undefined,
+        dispositionType: disposition.disposition_type ?? undefined,
+        salePrice: disposition.sale_price,
+        form4473Serial: disposition.form_4473_serial ?? undefined,
+        notes: disposition.notes ?? undefined,
+      };
+      await generateAndShareBillOfSale(data);
+    } catch (e: any) {
+      Alert.alert('PDF Error', e?.message ?? 'Could not generate Bill of Sale.');
+    }
+  }
 
   function isPendingNfa(f: Firearm): boolean {
     if (!f.is_nfa) return false;
@@ -280,6 +309,20 @@ export default function FirearmDetail() {
   function totalPhotoCount(): number {
     return (firearm?.image_uri ? 1 : 0) + photos.length;
   }
+
+  /** Build array of all images: primary + gallery photos, for the full-screen viewer. */
+  const allImages = useMemo(() => {
+    const imgs: { uri: string; label?: string }[] = [];
+    if (firearm?.image_uri) {
+      const resolved = resolveImageUri(firearm.image_uri);
+      if (resolved) imgs.push({ uri: resolved, label: 'Primary' });
+    }
+    for (const p of photos) {
+      const resolved = resolveImageUri(p.image_uri);
+      if (resolved) imgs.push({ uri: resolved });
+    }
+    return imgs;
+  }, [firearm?.image_uri, photos]);
 
   async function handleAddPhoto() {
     const total = totalPhotoCount();
@@ -616,7 +659,7 @@ export default function FirearmDetail() {
           {firearm.serial_number ? <Row label="Serial Number" value={firearm.serial_number} /> : null}
           {firearm.condition_rating ? <Row label="Condition" value={firearm.condition_rating} gold /> : null}
           {firearm.storage_location ? <Row label="Storage" value={firearm.storage_location} /> : null}
-          {firearm.round_count ? <Row label="Round Count" value={firearm.round_count.toLocaleString()} /> : null}
+          <Row label="Round Count" value={`${(firearm.round_count || 0).toLocaleString()} rds`} gold />
         </View>
 
         {/* Disposition — presence of a row means this firearm has left
@@ -646,6 +689,13 @@ export default function FirearmDetail() {
               ) : null}
               {disposition.notes ? <Row label="Notes" value={disposition.notes} /> : null}
               <Text style={s.dispEditHint}>Tap to edit or undo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.billOfSaleBtn}
+              activeOpacity={0.8}
+              onPress={() => handleBillOfSale()}
+            >
+              <Text style={s.billOfSaleBtnTxt}>Generate Bill of Sale</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -715,12 +765,28 @@ export default function FirearmDetail() {
 
         <Text style={s.sectionLabel}>ACQUISITION</Text>
         <View style={s.card}>
+          {firearm.ownership_type && firearm.ownership_type !== 'personal' ? (
+            <Row label="Ownership" value="Business / FFL" gold />
+          ) : null}
           {firearm.acquisition_method ? <Row label="Method" value={firearm.acquisition_method} /> : null}
           {firearm.purchase_date ? <Row label="Date" value={formatDate(firearm.purchase_date) ?? firearm.purchase_date} /> : null}
           {firearm.purchased_from ? <Row label="Purchased From" value={firearm.purchased_from} /> : null}
           {firearm.dealer_city_state ? <Row label="Dealer Location" value={firearm.dealer_city_state} /> : null}
           {firearm.purchase_price ? <Row label="Purchase Price" value={`$${firearm.purchase_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} /> : null}
           {firearm.current_value ? <Row label="Current Value" value={`$${firearm.current_value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} gold /> : null}
+          <TouchableOpacity
+            style={{ paddingHorizontal: 14, paddingVertical: 8 }}
+            onPress={() => {
+              const q = encodeURIComponent(`${firearm.make} ${firearm.model}`);
+              Linking.openURL(`https://truegunvalue.com/search?q=${q}`).catch(() =>
+                Linking.openURL(`https://www.google.com/search?q=site:truegunvalue.com+${q}`)
+              );
+            }}
+          >
+            <Text style={{ color: '#4A90D9', fontSize: 13, fontWeight: '600' }}>
+              Look up on TrueGunValue ›
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Range sessions — collapsed until there's at least one record.
@@ -924,7 +990,11 @@ export default function FirearmDetail() {
             contentContainerStyle={s.galleryStrip}
           >
             {firearm.image_uri ? (
-              <View style={s.galleryTile}>
+              <TouchableOpacity
+                style={s.galleryTile}
+                onPress={() => { setViewerIndex(0); setViewerVisible(true); }}
+                activeOpacity={0.8}
+              >
                 <Image
                   source={{ uri: resolveImageUri(firearm.image_uri) ?? undefined }}
                   style={s.galleryImage}
@@ -932,12 +1002,13 @@ export default function FirearmDetail() {
                 <View style={s.galleryPrimaryBadge}>
                   <Text style={s.galleryPrimaryText}>PRIMARY</Text>
                 </View>
-              </View>
+              </TouchableOpacity>
             ) : null}
-            {photos.map((photo) => (
+            {photos.map((photo, idx) => (
               <TouchableOpacity
                 key={photo.id}
                 style={s.galleryTile}
+                onPress={() => { setViewerIndex(firearm?.image_uri ? idx + 1 : idx); setViewerVisible(true); }}
                 onLongPress={() => handleDeletePhoto(photo)}
                 activeOpacity={0.8}
               >
@@ -1371,6 +1442,44 @@ export default function FirearmDetail() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Full-screen image viewer modal */}
+      <Modal visible={viewerVisible} transparent animationType="fade" onRequestClose={() => setViewerVisible(false)}>
+        <View style={s.viewerOverlay}>
+          <TouchableOpacity style={s.viewerClose} onPress={() => setViewerVisible(false)}>
+            <Text style={s.viewerCloseText}>✕</Text>
+          </TouchableOpacity>
+          {allImages.length > 0 && allImages[viewerIndex] ? (
+            <Image
+              source={{ uri: allImages[viewerIndex].uri }}
+              style={s.viewerImage}
+              resizeMode="contain"
+            />
+          ) : null}
+          {allImages.length > 1 ? (
+            <View style={s.viewerNav}>
+              <TouchableOpacity
+                onPress={() => setViewerIndex(i => Math.max(0, i - 1))}
+                style={s.viewerNavBtn}
+                disabled={viewerIndex === 0}
+              >
+                <Text style={[s.viewerNavText, viewerIndex === 0 && { opacity: 0.3 }]}>‹</Text>
+              </TouchableOpacity>
+              <Text style={s.viewerCounter}>{viewerIndex + 1} / {allImages.length}</Text>
+              <TouchableOpacity
+                onPress={() => setViewerIndex(i => Math.min(allImages.length - 1, i + 1))}
+                style={s.viewerNavBtn}
+                disabled={viewerIndex === allImages.length - 1}
+              >
+                <Text style={[s.viewerNavText, viewerIndex === allImages.length - 1 && { opacity: 0.3 }]}>›</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {allImages[viewerIndex]?.label ? (
+            <Text style={s.viewerLabel}>{allImages[viewerIndex].label}</Text>
+          ) : null}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }function Row({ label, value, gold, last }: { label: string; value: string; gold?: boolean; last?: boolean }) {
@@ -1416,6 +1525,11 @@ const s = StyleSheet.create({
     backgroundColor: SURFACE, alignItems: 'center',
   },
   disposeBtnText: { color: GOLD, fontSize: 14, fontWeight: '600' },
+  billOfSaleBtn: {
+    marginHorizontal: 16, marginBottom: 20, paddingVertical: 14,
+    borderRadius: 10, borderWidth: 1, borderColor: GOLD, alignItems: 'center',
+  },
+  billOfSaleBtnTxt: { color: GOLD, fontSize: 14, fontWeight: '600' },
   card: { backgroundColor: SURFACE, borderRadius: 14, marginHorizontal: 16, marginBottom: 20,
     borderWidth: 1, borderColor: BORDER, overflow: 'hidden' },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -1604,4 +1718,13 @@ const s = StyleSheet.create({
   rangeDate: { color: '#FFF', fontSize: 14, fontWeight: '700' },
   rangeLocation: { color: MUTED, fontSize: 12, marginTop: 2 },
   rangeRounds: { color: GOLD, fontSize: 13, fontWeight: '700' },
+  viewerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
+  viewerClose: { position: 'absolute', top: 60, right: 20, zIndex: 10, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
+  viewerCloseText: { color: 'white', fontSize: 20, fontWeight: '600' },
+  viewerImage: { width: '90%', height: '70%' },
+  viewerNav: { flexDirection: 'row', alignItems: 'center', marginTop: 20, gap: 24 },
+  viewerNavBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
+  viewerNavText: { color: 'white', fontSize: 32, fontWeight: '300' },
+  viewerCounter: { color: '#aaa', fontSize: 14 },
+  viewerLabel: { color: '#C9A84C', fontSize: 12, fontWeight: '600', marginTop: 8 },
 });

@@ -340,13 +340,31 @@ export default function InsuranceScreen() {
   const router    = useRouter();
   const ent       = useEntitlements();
   const [firearms, setFirearms] = useState<Firearm[]>([]);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [loading,  setLoading]  = useState(false);
 
   useFocusEffect(useCallback(() => {
-    setFirearms(getAllFirearms());
+    const all = getAllFirearms();
+    setFirearms(all);
+    setSelected(new Set(all.map(f => f.id)));
   }, []));
 
-  const totalValue = firearms.reduce((s, f) => s + (f.current_value ?? 0), 0);
+  function toggleItem(id: number) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (selected.size === firearms.length) setSelected(new Set());
+    else setSelected(new Set(firearms.map(f => f.id)));
+  }
+
+  const selectedFirearms = firearms.filter(f => selected.has(f.id));
+  const totalValue = selectedFirearms.reduce((s, f) => s + (f.current_value ?? 0), 0);
 
   /**
    * Preload embeds (hero photo + gallery + accessories) per firearm.
@@ -385,10 +403,14 @@ export default function InsuranceScreen() {
   async function handleSharePdf() {
     setLoading(true);
     try {
-      const latest = getAllFirearms();
-      setFirearms(latest);
-      const embeds = await preloadEmbeds(latest);
-      const html = buildReportHtml(latest, embeds);
+      const items = selectedFirearms;
+      if (items.length === 0) {
+        Alert.alert('Nothing Selected', 'Select at least one firearm to include.');
+        setLoading(false);
+        return;
+      }
+      const embeds = await preloadEmbeds(items);
+      const html = buildReportHtml(items, embeds);
       const { uri } = await Print.printToFileAsync({ html, base64: false });
 
       // Rename the generated file so the share sheet shows a meaningful
@@ -430,11 +452,15 @@ export default function InsuranceScreen() {
   async function handleShareText() {
     setLoading(true);
     try {
-      const latest = getAllFirearms();
-      setFirearms(latest);
+      const items = selectedFirearms;
+      if (items.length === 0) {
+        Alert.alert('Nothing Selected', 'Select at least one firearm to include.');
+        setLoading(false);
+        return;
+      }
       await Share.share({
         title:   'Iron Ledger — Insurance Report',
-        message: buildShareText(latest),
+        message: buildShareText(items),
       });
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Could not share report.');
@@ -495,8 +521,8 @@ export default function InsuranceScreen() {
           <View style={s.divider} />
           <View style={s.row}>
             <View style={s.stat}>
-              <Text style={s.statNum}>{firearms.length}</Text>
-              <Text style={s.statLbl}>Firearms</Text>
+              <Text style={s.statNum}>{selected.size} / {firearms.length}</Text>
+              <Text style={s.statLbl}>Selected</Text>
             </View>
             <View style={s.stat}>
               <Text style={s.statNum}>{fmt(totalValue)}</Text>
@@ -506,29 +532,44 @@ export default function InsuranceScreen() {
         </View>
 
         {/* export buttons — PDF primary, text secondary */}
-        <TouchableOpacity style={s.shareBtn} onPress={handleSharePdf} disabled={loading}>
+        <TouchableOpacity style={[s.shareBtn, selected.size === 0 && { opacity: 0.4 }]} onPress={handleSharePdf} disabled={loading || selected.size === 0}>
           {loading
             ? <ActivityIndicator color="#000" />
-            : <Text style={s.shareTxt}>📄  Export PDF</Text>}
+            : <Text style={s.shareTxt}>📄  Export PDF ({selected.size})</Text>}
         </TouchableOpacity>
-        <TouchableOpacity style={s.textBtn} onPress={handleShareText} disabled={loading}>
+        <TouchableOpacity style={s.textBtn} onPress={handleShareText} disabled={loading || selected.size === 0}>
           <Text style={s.textBtnTxt}>Share as Text</Text>
         </TouchableOpacity>
         <Text style={s.hint}>
           PDF saves or emails the full report. Text works anywhere — Mail, Messages, Notes.
         </Text>
+
+        {/* Select All toggle */}
+        <TouchableOpacity style={s.selectAllRow} onPress={toggleAll} activeOpacity={0.7}>
+          <View style={[s.checkbox, selected.size === firearms.length && s.checkboxChecked]}>
+            {selected.size === firearms.length ? <Text style={s.checkmark}>✓</Text> : null}
+          </View>
+          <Text style={s.selectAllText}>
+            {selected.size === firearms.length ? 'Deselect All' : 'Select All'}
+          </Text>
+        </TouchableOpacity>
+
         {/* firearm list */}
         {firearms.map((f) => {
+          const isSelected = selected.has(f.id);
           const name = f.nickname || `${f.make} ${f.model}`;
           const sub = f.nickname ? `${f.make} ${f.model}` : null;
           return (
-            <View key={f.id} style={s.card}>
+            <TouchableOpacity key={f.id} style={[s.card, !isSelected && s.cardDim]} onPress={() => toggleItem(f.id)} activeOpacity={0.75}>
               <View style={s.cardHeader}>
+                <View style={[s.checkbox, isSelected && s.checkboxChecked, { marginRight: 12 }]}>
+                  {isSelected ? <Text style={s.checkmark}>✓</Text> : null}
+                </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.cardName}>{name}</Text>
+                  <Text style={[s.cardName, !isSelected && s.textDim]}>{name}</Text>
                   {sub ? <Text style={s.cardSub}>{sub}</Text> : null}
                 </View>
-                {f.current_value ? <Text style={s.cardValue}>{fmt(f.current_value)}</Text> : null}
+                {f.current_value ? <Text style={[s.cardValue, !isSelected && s.textDim]}>{fmt(f.current_value)}</Text> : null}
               </View>
               <View style={s.cardRow}>
                 <Text style={s.cardLbl}>Type</Text>
@@ -582,7 +623,7 @@ export default function InsuranceScreen() {
                   {f.atf_form_status ? <Text style={s.nfaStatus}>{f.atf_form_status}</Text> : null}
                 </View>
               ) : null}
-            </View>
+            </TouchableOpacity>
           );
         })}
         <View style={{ height: 40 }} />
@@ -638,4 +679,14 @@ const s = StyleSheet.create({
                  backgroundColor: 'rgba(201,168,76,0.15)', paddingHorizontal: 8, paddingVertical: 3,
                  borderRadius: 4, overflow: 'hidden' },
   nfaStatus:   { color: '#888', fontSize: 12 },
+  selectAllRow:{ flexDirection: 'row', alignItems: 'center', gap: 10,
+                 paddingVertical: 10, marginBottom: 6 },
+  selectAllText:{ color: '#c9a84c', fontSize: 14, fontWeight: '600' },
+  checkbox:    { width: 22, height: 22, borderRadius: 4,
+                 borderWidth: 1.5, borderColor: '#555',
+                 alignItems: 'center', justifyContent: 'center' },
+  checkboxChecked: { backgroundColor: '#c9a84c', borderColor: '#c9a84c' },
+  checkmark:   { color: '#000', fontSize: 14, fontWeight: '800' },
+  cardDim:     { opacity: 0.45 },
+  textDim:     { color: '#666' },
 });

@@ -4,16 +4,16 @@ import {
   Text,
   TextInput,
   ScrollView,
-  KeyboardAvoidingView,
   TouchableOpacity,
-  Platform,
   Alert,
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import FormScrollView from '../components/FormScrollView';
 import { getAmmoById, updateAmmo, getAllFirearms, parsePairedFirearmIds, Firearm } from '../lib/database';
 import { syncWidgets } from '../lib/widgetSync';
+import { suggestedGrains } from '../lib/grainSuggestions';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -34,6 +34,26 @@ export default function EditAmmoScreen() {
   const [notes, setNotes] = useState('');
   const [firearms, setFirearms] = useState<Firearm[]>([]);
   const [pairedIds, setPairedIds] = useState<number[]>([]);
+
+  // Handload fields
+  const [isHandload, setIsHandload] = useState(false);
+  const [powderBrand, setPowderBrand] = useState('');
+  const [powderType, setPowderType] = useState('');
+  const [chargeWeight, setChargeWeight] = useState('');
+  const [bulletBrand, setBulletBrand] = useState('');
+  const [bulletWeight, setBulletWeight] = useState('');
+  const [bulletType, setBulletType] = useState('');
+  const [brassBrand, setBrassBrand] = useState('');
+  const [brassTimesFired, setBrassTimesFired] = useState('');
+  const [primerBrand, setPrimerBrand] = useState('');
+  const [primerType, setPrimerType] = useState('');
+  const [coal, setCoal] = useState('');
+  const [cbto, setCbto] = useState('');
+  const [velocityFps, setVelocityFps] = useState('');
+  const [velocitySd, setVelocitySd] = useState('');
+  const [velocityEs, setVelocityEs] = useState('');
+  const [groupSize, setGroupSize] = useState('');
+  const [loadNotes, setLoadNotes] = useState('');
 
   const typeOptions = ['FMJ', 'JHP', 'SP', 'Match', 'Buckshot', 'Slug', 'Other'];
 
@@ -56,6 +76,24 @@ export default function EditAmmoScreen() {
         setLowStockThreshold(ammo.low_stock_threshold != null ? String(ammo.low_stock_threshold) : '100');
         setPairedIds(parsePairedFirearmIds(ammo.paired_firearm_ids));
         setNotes(ammo.notes || '');
+        setIsHandload(!!ammo.is_handload);
+        setPowderBrand(ammo.powder_brand || '');
+        setPowderType(ammo.powder_type || '');
+        setChargeWeight(ammo.charge_weight != null ? String(ammo.charge_weight) : '');
+        setBulletBrand(ammo.bullet_brand || '');
+        setBulletWeight(ammo.bullet_weight != null ? String(ammo.bullet_weight) : '');
+        setBulletType(ammo.bullet_type || '');
+        setBrassBrand(ammo.brass_brand || '');
+        setBrassTimesFired(ammo.brass_times_fired != null ? String(ammo.brass_times_fired) : '');
+        setPrimerBrand(ammo.primer_brand || '');
+        setPrimerType(ammo.primer_type || '');
+        setCoal(ammo.coal != null ? String(ammo.coal) : '');
+        setCbto(ammo.cbto != null ? String(ammo.cbto) : '');
+        setVelocityFps(ammo.velocity_fps != null ? String(ammo.velocity_fps) : '');
+        setVelocitySd(ammo.velocity_sd != null ? String(ammo.velocity_sd) : '');
+        setVelocityEs(ammo.velocity_es != null ? String(ammo.velocity_es) : '');
+        setGroupSize(ammo.group_size || '');
+        setLoadNotes(ammo.load_notes || '');
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to load ammo');
@@ -88,6 +126,24 @@ export default function EditAmmoScreen() {
         low_stock_threshold: lowStockThreshold ? parseInt(lowStockThreshold) : 100,
         paired_firearm_ids: pairedIds.length > 0 ? pairedIds : null,
         notes: notes.trim() || null,
+        is_handload: isHandload ? 1 : 0,
+        powder_brand: powderBrand.trim() || null,
+        powder_type: powderType.trim() || null,
+        charge_weight: chargeWeight ? parseFloat(chargeWeight) : null,
+        bullet_brand: bulletBrand.trim() || null,
+        bullet_weight: bulletWeight ? parseFloat(bulletWeight) : null,
+        bullet_type: bulletType.trim() || null,
+        brass_brand: brassBrand.trim() || null,
+        brass_times_fired: brassTimesFired ? parseInt(brassTimesFired) : null,
+        primer_brand: primerBrand.trim() || null,
+        primer_type: primerType.trim() || null,
+        coal: coal ? parseFloat(coal) : null,
+        cbto: cbto ? parseFloat(cbto) : null,
+        velocity_fps: velocityFps ? parseFloat(velocityFps) : null,
+        velocity_sd: velocitySd ? parseFloat(velocitySd) : null,
+        velocity_es: velocityEs ? parseFloat(velocityEs) : null,
+        group_size: groupSize.trim() || null,
+        load_notes: loadNotes.trim() || null,
       });
       syncWidgets();
       router.back();
@@ -98,23 +154,19 @@ export default function EditAmmoScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardAvoid}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Edit Ammo</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={styles.saveText}>Save</Text>
-          </TouchableOpacity>
-        </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={styles.cancelText}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Edit Ammo</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={styles.saveText}>Save</Text>
+        </TouchableOpacity>
+      </View>
 
-        {/* Content */}
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      {/* Content */}
+      <FormScrollView style={styles.content}>
           {/* Basic Info Section */}
           <Text style={styles.sectionLabel}>BASIC INFO</Text>
           <View style={styles.card}>
@@ -133,6 +185,42 @@ export default function EditAmmoScreen() {
             />
           </View>
 
+          {/* Factory / Handload Toggle */}
+          <View style={styles.toggleRow}>
+            <TouchableOpacity
+              style={[
+                styles.toggleBtn,
+                !isHandload && styles.toggleBtnActive,
+              ]}
+              onPress={() => setIsHandload(false)}
+            >
+              <Text
+                style={[
+                  styles.toggleBtnText,
+                  !isHandload && styles.toggleBtnTextActive,
+                ]}
+              >
+                Factory
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.toggleBtn,
+                isHandload && styles.toggleBtnActive,
+              ]}
+              onPress={() => setIsHandload(true)}
+            >
+              <Text
+                style={[
+                  styles.toggleBtnText,
+                  isHandload && styles.toggleBtnTextActive,
+                ]}
+              >
+                Handload
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Specifications Section */}
           <Text style={styles.sectionLabel}>SPECIFICATIONS</Text>
           <View style={styles.card}>
@@ -142,6 +230,21 @@ export default function EditAmmoScreen() {
               onChange={setGrain}
               keyboardType="number-pad"
             />
+            {suggestedGrains(caliber).length > 0 && (
+              <View style={styles.grainRow}>
+                {suggestedGrains(caliber).map((g) => (
+                  <TouchableOpacity
+                    key={g}
+                    style={[styles.grainChip, grain === String(g) && styles.grainChipActive]}
+                    onPress={() => setGrain(String(g))}
+                  >
+                    <Text style={[styles.grainChipText, grain === String(g) && styles.grainChipTextActive]}>
+                      {g}gr
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
             <Text style={styles.subLabel}>Type</Text>
             <View style={styles.chipRow}>
               {typeOptions.map((option) => (
@@ -165,6 +268,162 @@ export default function EditAmmoScreen() {
               ))}
             </View>
           </View>
+
+          {/* Load Data Section — Only shown when handload is true */}
+          {isHandload && (
+            <>
+              <Text style={styles.sectionLabel}>LOAD DATA</Text>
+
+              {/* Powder Card */}
+              <View style={styles.card}>
+                <Field
+                  label="Powder Brand"
+                  value={powderBrand}
+                  onChange={setPowderBrand}
+                  placeholder="e.g. Hodgdon, IMR"
+                />
+                <Field
+                  label="Powder Type"
+                  value={powderType}
+                  onChange={setPowderType}
+                  placeholder="e.g. H4831SC"
+                />
+                <Field
+                  label="Charge Weight"
+                  value={chargeWeight}
+                  onChange={setChargeWeight}
+                  keyboardType="decimal-pad"
+                  placeholder="grains"
+                  last
+                />
+              </View>
+
+              {/* Projectile Card */}
+              <View style={styles.card}>
+                <Field
+                  label="Bullet Brand"
+                  value={bulletBrand}
+                  onChange={setBulletBrand}
+                  placeholder="e.g. Sierra, Hornady"
+                />
+                <Field
+                  label="Bullet Weight"
+                  value={bulletWeight}
+                  onChange={setBulletWeight}
+                  keyboardType="number-pad"
+                  placeholder="grains"
+                />
+                <Field
+                  label="Bullet Type"
+                  value={bulletType}
+                  onChange={setBulletType}
+                  placeholder="e.g. 77gr BTHP"
+                  last
+                />
+              </View>
+
+              {/* Brass Card */}
+              <View style={styles.card}>
+                <Field
+                  label="Brass Brand"
+                  value={brassBrand}
+                  onChange={setBrassBrand}
+                  placeholder="e.g. Lapua, Starline"
+                />
+                <Field
+                  label="Times Fired"
+                  value={brassTimesFired}
+                  onChange={setBrassTimesFired}
+                  keyboardType="number-pad"
+                  placeholder="number of times"
+                  last
+                />
+              </View>
+
+              {/* Primer Card */}
+              <View style={styles.card}>
+                <Field
+                  label="Primer Brand"
+                  value={primerBrand}
+                  onChange={setPrimerBrand}
+                  placeholder="e.g. CCI, Federal"
+                />
+                <Field
+                  label="Primer Type"
+                  value={primerType}
+                  onChange={setPrimerType}
+                  placeholder="e.g. 200 Large Rifle Magnum"
+                  last
+                />
+              </View>
+
+              {/* Measurements Card */}
+              <View style={styles.card}>
+                <Field
+                  label="COAL"
+                  value={coal}
+                  onChange={setCoal}
+                  keyboardType="decimal-pad"
+                  placeholder="Cartridge Overall Length"
+                />
+                <Field
+                  label="CBTO"
+                  value={cbto}
+                  onChange={setCbto}
+                  keyboardType="decimal-pad"
+                  placeholder="Case Base to Ogive"
+                  last
+                />
+              </View>
+
+              {/* Chronograph Card */}
+              <View style={styles.card}>
+                <Field
+                  label="Velocity"
+                  value={velocityFps}
+                  onChange={setVelocityFps}
+                  keyboardType="number-pad"
+                  placeholder="fps"
+                />
+                <Field
+                  label="SD"
+                  value={velocitySd}
+                  onChange={setVelocitySd}
+                  keyboardType="decimal-pad"
+                  placeholder="Standard Deviation"
+                />
+                <Field
+                  label="ES"
+                  value={velocityEs}
+                  onChange={setVelocityEs}
+                  keyboardType="decimal-pad"
+                  placeholder="Extreme Spread"
+                />
+                <Field
+                  label="Group Size"
+                  value={groupSize}
+                  onChange={setGroupSize}
+                  placeholder="e.g. 0.5 MOA @ 100yd"
+                  last
+                />
+              </View>
+
+              {/* Load Notes Card */}
+              <View style={styles.card}>
+                <View style={styles.notesContainer}>
+                  <TextInput
+                    style={styles.notesInput}
+                    value={loadNotes}
+                    onChangeText={setLoadNotes}
+                    placeholder="Add any load-specific notes..."
+                    placeholderTextColor={MUTED}
+                    multiline
+                    numberOfLines={4}
+                  />
+                </View>
+              </View>
+            </>
+          )}
 
           {/* Quantity Section */}
           <Text style={styles.sectionLabel}>QUANTITY</Text>
@@ -255,8 +514,7 @@ export default function EditAmmoScreen() {
           </View>
 
           <View style={styles.bottomSpacer} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }
@@ -432,7 +690,59 @@ const styles = StyleSheet.create({
     minHeight: 100,
     textAlignVertical: 'top',
   },
+  grainRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 14,
+    paddingBottom: 8,
+    gap: 6,
+  },
+  grainChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: 'transparent',
+  },
+  grainChipActive: {
+    backgroundColor: GOLD,
+    borderColor: GOLD,
+  },
+  grainChipText: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  grainChipTextActive: {
+    color: BG,
+  },
   bottomSpacer: {
     height: 20,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  toggleBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+  },
+  toggleBtnActive: {
+    backgroundColor: GOLD,
+    borderColor: GOLD,
+  },
+  toggleBtnText: {
+    color: MUTED,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  toggleBtnTextActive: {
+    color: BG,
   },
 });

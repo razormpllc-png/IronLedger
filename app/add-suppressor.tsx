@@ -7,11 +7,12 @@
 
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, KeyboardAvoidingView, Platform, Alert, Image,
+  ScrollView, Alert, Image,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useCallback, useEffect, useMemo } from 'react';
+import FormScrollView from '../components/FormScrollView';
 import { router, useFocusEffect } from 'expo-router';
 import {
   addSuppressor, resolveImageUri, getAllFirearms, getAllSuppressors,
@@ -45,6 +46,7 @@ const MOUNT_TYPE_LABELS: Record<string, string> = {
   qd: 'Quick Detach',
   hybrid: 'Hybrid',
 };
+const END_CAP_TYPES = ['Flat', 'Angled', 'Flash Hider', 'Sacrificial', 'None'];
 
 /** Auto-format date input as MM/DD/YYYY. Same helper as add-firearm. */
 function autoFormatDate(text: string, prev: string): string {
@@ -100,6 +102,8 @@ export default function AddSuppressor() {
   const [threadPitch, setThreadPitch] = useState('');
   const [mountType, setMountType] = useState('');
   const [fullAutoRated, setFullAutoRated] = useState(false);
+  const [endCapType, setEndCapType] = useState('');
+  const [endCapNotes, setEndCapNotes] = useState('');
   const [ocrRunning, setOcrRunning] = useState(false);
   // Stash the raw URI of the most recent accepted ATF scan so we can
   // copy it into the ATF Form On File slot after insertion gives us an ID.
@@ -111,11 +115,13 @@ export default function AddSuppressor() {
     selectedCondition, purchasedFrom, dealerCityState, storageLocation, roundCount, notes,
     hostNotes, nfaFormType, atfStatus, atfControlNumber, dateFiled, dateApproved, taxPaid,
     trustType, trustId, lengthInches, weightOz, threadPitch, mountType, fullAutoRated,
+    endCapType, endCapNotes,
   }), [
     make, model, caliber, serialNumber, purchaseDate, purchasePrice, currentValue,
     selectedCondition, purchasedFrom, dealerCityState, storageLocation, roundCount, notes,
     hostNotes, nfaFormType, atfStatus, atfControlNumber, dateFiled, dateApproved, taxPaid,
     trustType, trustId, lengthInches, weightOz, threadPitch, mountType, fullAutoRated,
+    endCapType, endCapNotes,
   ]);
   const { restored, clearDraft } = useAutoSave('add-suppressor', formSnapshot);
 
@@ -148,6 +154,8 @@ export default function AddSuppressor() {
     setThreadPitch(restored.threadPitch ?? '');
     setMountType(restored.mountType ?? '');
     setFullAutoRated(restored.fullAutoRated ?? false);
+    setEndCapType(restored.endCapType ?? '');
+    setEndCapNotes(restored.endCapNotes ?? '');
   }, [restored]);
 
   useFocusEffect(useCallback(() => { setTrusts(getAllNfaTrusts()); }, []));
@@ -321,6 +329,8 @@ export default function AddSuppressor() {
       thread_pitch: threadPitch.trim() || null,
       mount_type: mountType || null,
       full_auto_rated: fullAutoRated ? 1 : 0,
+      end_cap_type: endCapType.trim() || null,
+      end_cap_notes: endCapNotes.trim() || null,
       host_notes: hostNotes.trim() || null,
     });
 
@@ -348,22 +358,18 @@ export default function AddSuppressor() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={styles.cancel}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>Add Suppressor</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={styles.save}>Save</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-        >
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={styles.cancel}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>Add Suppressor</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={styles.save}>Save</Text>
+        </TouchableOpacity>
+      </View>
+      <FormScrollView
+        contentContainerStyle={styles.scroll}
+      >
           <TouchableOpacity style={styles.photoBox} onPress={pickImage} activeOpacity={0.8}>
             {imageUri ? (
               <View style={{ flex: 1 }}>
@@ -530,6 +536,26 @@ export default function AddSuppressor() {
             </Text>
           </TouchableOpacity>
 
+          <Text style={styles.sectionLabel}>END CAP</Text>
+          <View style={styles.chipRow}>
+            {END_CAP_TYPES.map(e => (
+              <TouchableOpacity key={e}
+                style={[styles.chip, endCapType === e && styles.chipActive]}
+                onPress={() => setEndCapType(endCapType === e ? '' : e)}>
+                <Text style={[styles.chipText, endCapType === e && styles.chipTextActive]}>{e}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.card}>
+            <TextInput
+              style={styles.notesInput}
+              value={endCapNotes} onChangeText={setEndCapNotes}
+              placeholder='Notes on end cap condition, performance, etc.'
+              placeholderTextColor={MUTED}
+              multiline numberOfLines={3} textAlignVertical="top"
+            />
+          </View>
+
           <Text style={styles.sectionLabel}>PURCHASE</Text>
           <View style={styles.card}>
             <Field label="Purchase Date"
@@ -556,8 +582,7 @@ export default function AddSuppressor() {
           </View>
 
           <View style={{ height: 120 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }

@@ -4,11 +4,12 @@
 
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, KeyboardAvoidingView, Platform, Alert, Image,
+  ScrollView, Alert, Image,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useCallback } from 'react';
+import FormScrollView from '../components/FormScrollView';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
   updateSuppressor, deleteSuppressor, getSuppressorById,
@@ -42,6 +43,7 @@ const MOUNT_TYPE_LABELS: Record<string, string> = {
   qd: 'Quick Detach',
   hybrid: 'Hybrid',
 };
+const END_CAP_TYPES = ['Flat', 'Angled', 'Flash Hider', 'Sacrificial', 'None'];
 
 function autoFormatDate(text: string, prev: string): string {
   const digits = text.replace(/\D/g, '');
@@ -96,6 +98,8 @@ export default function EditSuppressor() {
   const [threadPitch, setThreadPitch] = useState('');
   const [mountType, setMountType] = useState('');
   const [fullAutoRated, setFullAutoRated] = useState(false);
+  const [endCapType, setEndCapType] = useState('');
+  const [endCapNotes, setEndCapNotes] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [ocrRunning, setOcrRunning] = useState(false);
 
@@ -254,6 +258,8 @@ export default function EditSuppressor() {
     setThreadPitch(row.thread_pitch ?? '');
     setMountType(row.mount_type ?? '');
     setFullAutoRated(!!row.full_auto_rated);
+    setEndCapType(row.end_cap_type || '');
+    setEndCapNotes(row.end_cap_notes || '');
     setLoaded(true);
   }, [suppressorId, loaded]));
 
@@ -304,6 +310,8 @@ export default function EditSuppressor() {
       thread_pitch: threadPitch.trim() || null,
       mount_type: mountType || null,
       full_auto_rated: fullAutoRated ? 1 : 0,
+      end_cap_type: endCapType.trim() || null,
+      end_cap_notes: endCapNotes.trim() || null,
       host_notes: hostNotes.trim() || null,
     });
     syncWidgets();
@@ -333,22 +341,18 @@ export default function EditSuppressor() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={styles.cancel}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>Edit Suppressor</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={styles.save}>Save</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-        >
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={styles.cancel}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>Edit Suppressor</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={styles.save}>Save</Text>
+        </TouchableOpacity>
+      </View>
+      <FormScrollView
+        contentContainerStyle={styles.scroll}
+      >
           <TouchableOpacity style={styles.photoBox} onPress={pickImage} activeOpacity={0.8}>
             {imageUri ? (
               <View style={{ flex: 1 }}>
@@ -513,6 +517,26 @@ export default function EditSuppressor() {
             </Text>
           </TouchableOpacity>
 
+          <Text style={styles.sectionLabel}>END CAP</Text>
+          <View style={styles.chipRow}>
+            {END_CAP_TYPES.map(e => (
+              <TouchableOpacity key={e}
+                style={[styles.chip, endCapType === e && styles.chipActive]}
+                onPress={() => setEndCapType(endCapType === e ? '' : e)}>
+                <Text style={[styles.chipText, endCapType === e && styles.chipTextActive]}>{e}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.card}>
+            <TextInput
+              style={styles.notesInput}
+              value={endCapNotes} onChangeText={setEndCapNotes}
+              placeholder='Notes on end cap condition, performance, etc.'
+              placeholderTextColor={MUTED}
+              multiline numberOfLines={3} textAlignVertical="top"
+            />
+          </View>
+
           <Text style={styles.sectionLabel}>PURCHASE</Text>
           <View style={styles.card}>
             <Field label="Purchase Date"
@@ -543,8 +567,7 @@ export default function EditSuppressor() {
           </TouchableOpacity>
 
           <View style={{ height: 120 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }

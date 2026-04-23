@@ -1,16 +1,18 @@
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, KeyboardAvoidingView, Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
+import FormScrollView from '../components/FormScrollView';
 import {
   addMaintenanceLog, getAmmoByCaliber, getDistinctCalibers, deductAmmo,
   getFirearmById, getAllAmmo, Ammo,
   setFirearmMaintenanceNotificationId,
 } from '../lib/database';
 import { syncWidgets } from '../lib/widgetSync';
+import { useAutoSave } from '../lib/useDraft';
 import { entitlementsStore } from '../lib/entitlements';
 import { hasFeature } from '../lib/entitlements';
 import {
@@ -88,6 +90,36 @@ export default function AddMaintenance() {
   const [selectedAmmoId, setSelectedAmmoId] = useState<number | null>(null);
   const [ammoOptions, setAmmoOptions] = useState<Ammo[]>([]);
 
+  // ── Auto-save draft ──────────────────────────────────────
+  const formSnapshot = useMemo(() => ({
+    selectedType, date, notes, cleaningType, solvents, partsReplaced,
+    inspectionReason, roundsFired, repairsMade, selectedComponents,
+    upgradeDesc, rangeRounds, duration, conditions,
+  }), [
+    selectedType, date, notes, cleaningType, solvents, partsReplaced,
+    inspectionReason, roundsFired, repairsMade, selectedComponents,
+    upgradeDesc, rangeRounds, duration, conditions,
+  ]);
+  const { restored, clearDraft } = useAutoSave(`add-maintenance:${firearm_id}`, formSnapshot);
+
+  useEffect(() => {
+    if (!restored) return;
+    setSelectedType(restored.selectedType ?? 'Cleaning');
+    setDate(restored.date ?? todayString());
+    setNotes(restored.notes ?? '');
+    setCleaningType(restored.cleaningType ?? 'Wipe Down');
+    setSolvents(restored.solvents ?? '');
+    setPartsReplaced(restored.partsReplaced ?? '');
+    setInspectionReason(restored.inspectionReason ?? 'Pre');
+    setRoundsFired(restored.roundsFired ?? '');
+    setRepairsMade(restored.repairsMade ?? '');
+    setSelectedComponents(restored.selectedComponents ?? []);
+    setUpgradeDesc(restored.upgradeDesc ?? '');
+    setRangeRounds(restored.rangeRounds ?? '');
+    setDuration(restored.duration ?? '');
+    setConditions(restored.conditions ?? '');
+  }, [restored]);
+
   // Load matching ammo when component mounts
   useEffect(() => {
     const firearm = getFirearmById(Number(firearm_id));
@@ -154,6 +186,7 @@ export default function AddMaintenance() {
       notes: notes.trim() || null,
       details: buildDetails(),
     });
+    clearDraft();
     syncWidgets();
     // Re-arm the maintenance reminder for this firearm, anchored off the
     // log we just saved. Pro-only — Lite users can still log maintenance,
@@ -240,17 +273,16 @@ export default function AddMaintenance() {
 
   return (
     <SafeAreaView style={s.container}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={s.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={s.cancel}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={s.title}>Add Entry</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={s.save}>Save</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={s.cancel}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={s.title}>Add Entry</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={s.save}>Save</Text>
+        </TouchableOpacity>
+      </View>
+      <FormScrollView contentContainerStyle={s.scroll}>
 
           <Text style={s.sectionLabel}>TYPE</Text>
           <View style={s.typeGrid}>
@@ -434,8 +466,7 @@ export default function AddMaintenance() {
           </View>
 
           <View style={{ height: 60 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }

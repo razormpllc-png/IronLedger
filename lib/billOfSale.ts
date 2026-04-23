@@ -1,0 +1,171 @@
+// Bill of Sale PDF generation — used from both the dispose screen
+// and the firearm detail screen's disposition card.
+
+import * as Print from 'expo-print';
+import { shareAsync } from 'expo-sharing';
+
+export interface BillOfSaleData {
+  // Seller
+  sellerName?: string;
+  // Buyer
+  buyerName?: string;
+  buyerAddress?: string;
+  buyerFfl?: string;
+  // Firearm
+  make?: string;
+  model?: string;
+  serialNumber?: string;
+  caliber?: string;
+  type?: string;       // Pistol, Rifle, Shotgun, etc.
+  condition?: string;
+  // Transaction
+  salePrice?: number | null;
+  dispositionDate?: string;
+  dispositionType?: string;
+  form4473Serial?: string;
+  notes?: string;
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function row(label: string, value: string | undefined | null): string {
+  if (!value) return '';
+  return `
+    <tr>
+      <td style="padding:8px 12px;font-weight:600;color:#666;width:160px;border-bottom:1px solid #eee;">${escapeHtml(label)}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #eee;">${escapeHtml(value)}</td>
+    </tr>`;
+}
+
+function formatPrice(p: number): string {
+  return p.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+export function buildBillOfSaleHtml(data: BillOfSaleData): string {
+  const date = data.dispositionDate || new Date().toLocaleDateString();
+  const price = data.salePrice != null ? formatPrice(data.salePrice) : null;
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+  @page { margin: 40px; }
+  body {
+    font-family: -apple-system, Helvetica, Arial, sans-serif;
+    color: #222; font-size: 13px; line-height: 1.5;
+  }
+  .header {
+    text-align: center; border-bottom: 3px solid #222;
+    padding-bottom: 16px; margin-bottom: 24px;
+  }
+  .header h1 {
+    font-size: 24px; margin: 0 0 4px; letter-spacing: 2px; text-transform: uppercase;
+  }
+  .header p { margin: 0; color: #666; font-size: 12px; }
+  .section-title {
+    font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+    text-transform: uppercase; color: #999; margin: 24px 0 8px;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  .sig-line {
+    display: inline-block; width: 260px; border-bottom: 1px solid #222;
+    margin-top: 40px; margin-right: 40px;
+  }
+  .sig-label { font-size: 10px; color: #666; margin-top: 4px; }
+  .sig-block { margin-top: 50px; }
+  .sig-row { display: flex; justify-content: space-between; margin-bottom: 30px; }
+  .sig-col { flex: 1; }
+  .disclaimer {
+    margin-top: 40px; padding-top: 16px; border-top: 1px solid #ccc;
+    font-size: 10px; color: #888; line-height: 1.6;
+  }
+  .watermark {
+    text-align: center; color: #ddd; font-size: 9px;
+    margin-top: 20px; letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Bill of Sale</h1>
+  <p>Firearm Transfer Record</p>
+</div>
+
+<p class="section-title">Transaction Details</p>
+<table>
+  ${row('Date', date)}
+  ${row('Transaction Type', data.dispositionType)}
+  ${price ? row('Sale Price', price) : ''}
+  ${row('Form 4473 Serial', data.form4473Serial)}
+</table>
+
+<p class="section-title">Firearm Description</p>
+<table>
+  ${row('Make', data.make)}
+  ${row('Model', data.model)}
+  ${row('Serial Number', data.serialNumber)}
+  ${row('Caliber / Gauge', data.caliber)}
+  ${row('Type', data.type)}
+  ${row('Condition', data.condition)}
+</table>
+
+<p class="section-title">Seller</p>
+<table>
+  ${row('Name', data.sellerName || '________________________________')}
+</table>
+
+<p class="section-title">Buyer / Recipient</p>
+<table>
+  ${row('Name', data.buyerName || '________________________________')}
+  ${row('Address', data.buyerAddress)}
+  ${row('FFL Number', data.buyerFfl)}
+</table>
+
+${data.notes ? `
+<p class="section-title">Notes</p>
+<p style="padding:8px 12px;background:#f9f9f9;border-radius:4px;">${escapeHtml(data.notes)}</p>
+` : ''}
+
+<div class="sig-block">
+  <p class="section-title">Signatures</p>
+  <table style="width:100%">
+    <tr>
+      <td style="width:50%;padding-right:20px;">
+        <div class="sig-line"></div>
+        <div class="sig-label">Seller Signature &amp; Date</div>
+      </td>
+      <td style="width:50%;padding-left:20px;">
+        <div class="sig-line"></div>
+        <div class="sig-label">Buyer Signature &amp; Date</div>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div class="disclaimer">
+  <strong>DISCLAIMER:</strong> This Bill of Sale is a private record of the transfer described above.
+  It does not replace any federal, state, or local requirements for firearm transfers, including but
+  not limited to background checks, waiting periods, or FFL involvement. Both parties are responsible
+  for complying with all applicable laws. This document is generated for record-keeping purposes only
+  and does not constitute legal advice.
+</div>
+
+<div class="watermark">Generated by Iron Ledger</div>
+
+</body>
+</html>`;
+}
+
+export async function generateAndShareBillOfSale(data: BillOfSaleData): Promise<void> {
+  const html = buildBillOfSaleHtml(data);
+  const { uri } = await Print.printToFileAsync({ html });
+  await shareAsync(uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });
+}

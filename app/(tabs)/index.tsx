@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   initDB, getAllFirearms, getAllSuppressors, getActiveBatteryLogs,
-  resolveImageUri, Firearm, Suppressor,
+  getAllDispositionsByItemKey, resolveImageUri, Firearm, Suppressor, Disposition,
 } from '../../lib/database';
 import { bucketFor } from '../../lib/batteryStats';
 import type { BatteryBucket } from '../../lib/batteryStats';
@@ -22,6 +22,15 @@ const MUTED = '#555555';
 const TYPES = ['All', 'Handgun', 'Rifle', 'Shotgun', 'PDW', 'PCC', 'Suppressor', 'NFA', 'Other'];
 const NFA_TYPES = ['Suppressor', 'SBR', 'SBS', 'AOW'];
 const CONDITION_ORDER = ['Excellent', 'Good', 'Fair', 'Poor'];
+
+// Firearm type color map for tagged display
+const TYPE_COLORS: Record<string, string> = {
+  Handgun: '#4A90D9',
+  Rifle: '#D4912A',
+  Shotgun: '#8E6FBF',
+  PDW: '#4A90D9',
+  PCC: '#D4912A',
+};
 
 // Battery chip colors — only overdue and due_soon surface on the tile (a green
 // "ok" badge on every battery-tracked firearm would just be visual noise).
@@ -46,29 +55,40 @@ type ArmoryItem =
   | { kind: 'suppressor'; data: Suppressor };
 
 function FirearmCard({
-  item, onPress, batteryBucket,
+  item, onPress, batteryBucket, disposition,
 }: {
   item: Firearm;
   onPress: () => void;
   batteryBucket?: BatteryBucket | null;
+  disposition?: Disposition | null;
 }) {
   const [imgError, setImgError] = useState(false);
   const showBatteryChip = batteryBucket === 'overdue' || batteryBucket === 'due_soon';
+  const disposed = !!disposition;
   return (
-    <TouchableOpacity style={s.card} onPress={onPress} activeOpacity={0.75}>
+    <TouchableOpacity style={[s.card, disposed && s.cardDisposed]} onPress={onPress} activeOpacity={0.75}>
       {item.image_uri && !imgError ? (
-        <Image source={{ uri: resolveImageUri(item.image_uri) ?? undefined }} style={s.cardImage} onError={() => setImgError(true)} />
+        <Image source={{ uri: resolveImageUri(item.image_uri) ?? undefined }} style={[s.cardImage, disposed && s.imgDisposed]} onError={() => setImgError(true)} />
       ) : (
         <View style={s.iconBox}><Image source={require('../../assets/Icon.png')} style={s.iconImg} /></View>
       )}
       <View style={s.cardBody}>
-        <Text style={s.cardName}>{item.make} {item.model}</Text>
+        <Text style={[s.cardName, disposed && s.textDisposed]}>{item.make} {item.model}</Text>
         <View style={s.tagRow}>
-          {item.type ? <View style={s.tag}><Text style={s.tagText}>{item.type}</Text></View> : null}
+          {disposed ? (
+            <View style={[s.tag, s.disposedTag]}>
+              <Text style={s.disposedTagText}>{disposition!.disposition_type.toUpperCase()}</Text>
+            </View>
+          ) : null}
+          {item.type ? (
+            <View style={[s.tag, TYPE_COLORS[item.type] ? { backgroundColor: `${TYPE_COLORS[item.type]}20`, borderWidth: 1, borderColor: `${TYPE_COLORS[item.type]}60` } : null]}>
+              <Text style={[s.tagText, TYPE_COLORS[item.type] ? { color: TYPE_COLORS[item.type] } : null]}>{item.type}</Text>
+            </View>
+          ) : null}
           {item.caliber ? <View style={s.tag}><Text style={s.tagText}>{item.caliber}</Text></View> : null}
           {item.condition_rating ? (
-            <View style={[s.tag, s.conditionTag]}>
-              <Text style={s.conditionText}>{item.condition_rating}</Text>
+            <View style={s.tag}>
+              <Text style={s.tagText}>{item.condition_rating}</Text>
             </View>
           ) : null}
           {showBatteryChip ? (
@@ -80,6 +100,7 @@ function FirearmCard({
           ) : null}
         </View>
         {item.serial_number ? <Text style={s.serial}>S/N: {item.serial_number}</Text> : null}
+        {item.round_count > 0 ? <Text style={s.roundCount}>{item.round_count.toLocaleString()} rds</Text> : null}
       </View>
       <Text style={s.chevron}>›</Text>
     </TouchableOpacity>
@@ -89,23 +110,32 @@ function FirearmCard({
 // Suppressors get their own card so we can show a gold SUPPRESSOR badge
 // and the tax-stamp / ATF status info that matters for NFA items at a
 // glance — rather than shoehorning those fields into FirearmCard.
-function SuppressorCard({ item, onPress }: { item: Suppressor; onPress: () => void }) {
+function SuppressorCard({ item, onPress, disposition }: { item: Suppressor; onPress: () => void; disposition?: Disposition | null }) {
   const [imgError, setImgError] = useState(false);
   const approved = item.atf_form_status === 'Approved';
+  const disposed = !!disposition;
   return (
-    <TouchableOpacity style={s.card} onPress={onPress} activeOpacity={0.75}>
+    <TouchableOpacity style={[s.card, disposed && s.cardDisposed]} onPress={onPress} activeOpacity={0.75}>
       {item.image_uri && !imgError ? (
-        <Image source={{ uri: resolveImageUri(item.image_uri) ?? undefined }} style={s.cardImage} onError={() => setImgError(true)} />
+        <Image source={{ uri: resolveImageUri(item.image_uri) ?? undefined }} style={[s.cardImage, disposed && s.imgDisposed]} onError={() => setImgError(true)} />
       ) : (
         <View style={s.iconBox}><Image source={require('../../assets/Icon.png')} style={s.iconImg} /></View>
       )}
       <View style={s.cardBody}>
-        <Text style={s.cardName}>{item.make} {item.model}</Text>
+        <Text style={[s.cardName, disposed && s.textDisposed]}>{item.make} {item.model}</Text>
         <View style={s.tagRow}>
+          {disposed ? (
+            <View style={[s.tag, s.disposedTag]}>
+              <Text style={s.disposedTagText}>{disposition!.disposition_type.toUpperCase()}</Text>
+            </View>
+          ) : null}
           <View style={[s.tag, s.suppressorBadge]}>
             <Text style={s.suppressorBadgeText}>SUPPRESSOR</Text>
           </View>
           {item.caliber ? <View style={s.tag}><Text style={s.tagText}>{item.caliber}</Text></View> : null}
+          {item.end_cap_type && item.end_cap_type !== 'None' ? (
+            <View style={s.tag}><Text style={s.tagText}>{item.end_cap_type}</Text></View>
+          ) : null}
           {item.atf_form_status ? (
             <View style={[s.tag, approved ? s.atfApprovedTag : s.atfPendingTag]}>
               <Text style={[s.tagText, approved ? s.atfApprovedText : s.atfPendingText]}>
@@ -134,8 +164,12 @@ export default function ArmoryScreen() {
   // Worst battery bucket per firearm_id, so the Armory tile can surface an
   // at-a-glance chip without each card hitting the DB itself.
   const [batteryBuckets, setBatteryBuckets] = useState<Record<number, BatteryBucket>>({});
+  // Disposition map keyed by "kind:id" — used to badge disposed items and
+  // power the status filter (In Collection / Transferred / All).
+  const [dispositions, setDispositions] = useState<Map<string, Disposition>>(new Map());
   const [search, setSearch] = useState('');
   const [activeType, setActiveType] = useState('All');
+  const [statusFilter, setStatusFilter] = useState<'active' | 'transferred' | 'all'>('active');
   const [sortBy, setSortBy] = useState<'name' | 'value' | 'date' | 'condition'>('date');
 
   function handleAddPress() {
@@ -149,6 +183,7 @@ export default function ArmoryScreen() {
     Alert.alert('Add to Armory', 'What are you adding?', [
       { text: 'Firearm', onPress: () => router.push('/add-firearm') },
       { text: 'Suppressor', onPress: () => router.push('/add-suppressor') },
+      { text: 'Import from Spreadsheet', onPress: () => router.push('/import') },
       { text: 'Cancel', style: 'cancel' },
     ]);
   }
@@ -170,6 +205,7 @@ export default function ArmoryScreen() {
         if (!prev || RANK[b] > RANK[prev]) worst[log.firearm_id] = b;
       }
       setBatteryBuckets(worst);
+      setDispositions(getAllDispositionsByItemKey());
     }, [])
   );
 
@@ -187,7 +223,7 @@ export default function ArmoryScreen() {
     ]);
   }
 
-  // Firearm filtering — unchanged from the pre-suppressor version.
+  // Firearm filtering — type chip, search, and status (active/transferred/all).
   const firearmsFiltered = firearms.filter((f) => {
     const typeList = f.type ? f.type.split(', ') : [];
     let matchesType = false;
@@ -195,6 +231,11 @@ export default function ArmoryScreen() {
     else if (activeType === 'Suppressor') matchesType = false; // suppressors aren't firearms
     else if (activeType === 'NFA') matchesType = typeList.some(t => NFA_TYPES.includes(t)) || !!f.is_nfa;
     else matchesType = typeList.includes(activeType);
+
+    // Status filter — active = in collection, transferred = disposed, all = both
+    const isDisposed = dispositions.has(`firearm:${f.id}`);
+    if (statusFilter === 'active' && isDisposed) return false;
+    if (statusFilter === 'transferred' && !isDisposed) return false;
 
     const q = search.toLowerCase();
     const matchesSearch = !q ||
@@ -217,6 +258,11 @@ export default function ArmoryScreen() {
     let matchesType = false;
     if (activeType === 'All' || activeType === 'Suppressor' || activeType === 'NFA') matchesType = true;
     else matchesType = false;
+
+    // Status filter — same logic as firearms
+    const isDisposed = dispositions.has(`suppressor:${sup.id}`);
+    if (statusFilter === 'active' && isDisposed) return false;
+    if (statusFilter === 'transferred' && !isDisposed) return false;
 
     const q = search.toLowerCase();
     const matchesSearch = !q ||
@@ -286,6 +332,19 @@ export default function ArmoryScreen() {
           </TouchableOpacity>
         ))}
       </ScrollView>
+      {/* Status filter — In Collection (default) hides transferred items;
+          Transferred isolates them; All shows everything. */}
+      <View style={s.statusRow}>
+        {([['active', 'In Collection'], ['transferred', 'Transferred'], ['all', 'All']] as const).map(([key, label]) => (
+          <TouchableOpacity
+            key={key}
+            style={[s.statusChip, statusFilter === key && s.statusChipActive]}
+            onPress={() => setStatusFilter(key)}
+          >
+            <Text style={[s.statusChipText, statusFilter === key && s.statusChipTextActive]}>{label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       {combined.length === 0 ? (
         <View style={s.emptyState}>
           {totalItems === 0 ? (
@@ -309,6 +368,7 @@ export default function ArmoryScreen() {
                   item={item.data}
                   onPress={() => router.push(`/firearm/${item.data.id}`)}
                   batteryBucket={item.data.id != null ? batteryBuckets[item.data.id] ?? null : null}
+                  disposition={dispositions.get(`firearm:${item.data.id}`) ?? null}
                 />
               );
             }
@@ -316,6 +376,7 @@ export default function ArmoryScreen() {
               <SuppressorCard
                 item={item.data}
                 onPress={() => router.push(`/suppressor/${item.data.id}`)}
+                disposition={dispositions.get(`suppressor:${item.data.id}`) ?? null}
               />
             );
           }}
@@ -371,7 +432,21 @@ export default function ArmoryScreen() {
   atfApprovedText: { color: '#4CAF50' },
   atfPendingTag: { backgroundColor: 'rgba(255,193,7,0.12)', borderWidth: 1, borderColor: 'rgba(255,193,7,0.4)' },
   atfPendingText: { color: '#FFC107' },
+  // Disposition / transferred styling
+  cardDisposed: { opacity: 0.6 },
+  imgDisposed: { opacity: 0.5 },
+  textDisposed: { color: '#999' },
+  disposedTag: { backgroundColor: 'rgba(255,87,34,0.15)', borderWidth: 1, borderColor: 'rgba(255,87,34,0.4)' },
+  disposedTagText: { color: '#FF5722', fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  // Status filter row
+  statusRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 8, paddingBottom: 4, paddingTop: 2 },
+  statusChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14,
+    backgroundColor: 'transparent', borderWidth: 1, borderColor: '#333' },
+  statusChipActive: { backgroundColor: '#1E1A10', borderColor: GOLD },
+  statusChipText: { color: '#777', fontSize: 11, fontWeight: '600' },
+  statusChipTextActive: { color: GOLD, fontWeight: '700' },
   serial: { color: MUTED, fontSize: 12, marginTop: 2 },
+  roundCount: { color: '#888', fontSize: 11, marginTop: 2 },
   chevron: { color: '#444', fontSize: 22, fontWeight: '300' },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   emptyIcon: { fontSize: 56 },

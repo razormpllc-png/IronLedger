@@ -12,8 +12,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  View, Text, TextInput, ScrollView, KeyboardAvoidingView,
-  TouchableOpacity, Platform, Alert, StyleSheet,
+  View, Text, TextInput,
+  TouchableOpacity, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -22,7 +22,10 @@ import {
   getFirearmById, getSuppressorById,
   DISPOSITION_TYPES,
   type DispositionKind, type Disposition, type DispositionInput,
+  type Firearm, type Suppressor,
 } from '../lib/database';
+import { generateAndShareBillOfSale, type BillOfSaleData } from '../lib/billOfSale';
+import FormScrollView from '../components/FormScrollView';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -52,6 +55,7 @@ export default function DisposeScreen() {
 
   const [existing, setExisting] = useState<Disposition | null>(null);
   const [itemLabel, setItemLabel] = useState<string>('');
+  const [itemRecord, setItemRecord] = useState<Firearm | Suppressor | null>(null);
 
   const [date, setDate] = useState(todayString());
   const [type, setType] = useState<string>('Sold');
@@ -69,10 +73,16 @@ export default function DisposeScreen() {
       // Resolve a human-friendly label for the header subtitle.
       if (kind === 'firearm') {
         const f = getFirearmById(itemId);
-        if (f) setItemLabel(f.nickname || `${f.make} ${f.model}`.trim() || 'Firearm');
+        if (f) {
+          setItemLabel(f.nickname || `${f.make} ${f.model}`.trim() || 'Firearm');
+          setItemRecord(f);
+        }
       } else {
         const s = getSuppressorById(itemId);
-        if (s) setItemLabel(`${s.make} ${s.model}`.trim() || 'Suppressor');
+        if (s) {
+          setItemLabel(`${s.make} ${s.model}`.trim() || 'Suppressor');
+          setItemRecord(s);
+        }
       }
       const disp = getDispositionForItem(kind, itemId);
       if (disp) {
@@ -95,6 +105,32 @@ export default function DisposeScreen() {
     () => (existing ? 'Edit Disposition' : 'Dispose / Transfer Out'),
     [existing],
   );
+
+  async function handleBillOfSale() {
+    try {
+      const data: BillOfSaleData = {
+        buyerName: toName.trim() || undefined,
+        buyerAddress: toAddress.trim() || undefined,
+        buyerFfl: toFfl.trim() || undefined,
+        dispositionDate: date.trim() || undefined,
+        dispositionType: type || undefined,
+        salePrice: salePrice.trim() ? parseFloat(salePrice.replace(/[$,]/g, '')) : null,
+        form4473Serial: form4473.trim() || undefined,
+        notes: notes.trim() || undefined,
+      };
+      if (itemRecord) {
+        data.make = itemRecord.make ?? undefined;
+        data.model = itemRecord.model ?? undefined;
+        data.serialNumber = itemRecord.serial_number ?? undefined;
+        data.caliber = itemRecord.caliber ?? undefined;
+        if ('type' in itemRecord) data.type = (itemRecord as Firearm).type ?? undefined;
+        if ('condition' in itemRecord) data.condition = (itemRecord as Firearm).condition ?? undefined;
+      }
+      await generateAndShareBillOfSale(data);
+    } catch (e: any) {
+      Alert.alert('PDF Error', e?.message ?? 'Could not generate Bill of Sale.');
+    }
+  }
 
   function handleSave() {
     if (!kind || !itemId) {
@@ -183,26 +219,22 @@ export default function DisposeScreen() {
 
   return (
     <SafeAreaView style={s.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
-        <View style={s.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={s.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-          <View style={{ alignItems: 'center' }}>
-            <Text style={s.headerTitle}>{headerTitle}</Text>
-            {itemLabel ? <Text style={s.headerSub}>{itemLabel}</Text> : null}
-          </View>
-          <TouchableOpacity onPress={handleSave} disabled={saving}>
-            <Text style={[s.saveText, saving && { opacity: 0.5 }]}>
-              {existing ? 'Update' : 'Save'}
-            </Text>
-          </TouchableOpacity>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={s.cancelText}>Cancel</Text>
+        </TouchableOpacity>
+        <View style={{ alignItems: 'center' }}>
+          <Text style={s.headerTitle}>{headerTitle}</Text>
+          {itemLabel ? <Text style={s.headerSub}>{itemLabel}</Text> : null}
         </View>
+        <TouchableOpacity onPress={handleSave} disabled={saving}>
+          <Text style={[s.saveText, saving && { opacity: 0.5 }]}>
+            {existing ? 'Update' : 'Save'}
+          </Text>
+        </TouchableOpacity>
+      </View>
 
-        <ScrollView style={s.content} showsVerticalScrollIndicator={false}>
+      <FormScrollView style={s.content}>
           <Text style={s.sectionLabel}>DISPOSITION</Text>
           <View style={s.card}>
             <Field
@@ -291,6 +323,12 @@ export default function DisposeScreen() {
             </View>
           </View>
 
+          {kind === 'firearm' ? (
+            <TouchableOpacity style={s.billOfSaleBtn} onPress={handleBillOfSale}>
+              <Text style={s.billOfSaleBtnTxt}>Generate Bill of Sale</Text>
+            </TouchableOpacity>
+          ) : null}
+
           {existing ? (
             <TouchableOpacity style={s.deleteBtn} onPress={handleDelete}>
               <Text style={s.deleteBtnTxt}>Undo Disposition</Text>
@@ -305,8 +343,7 @@ export default function DisposeScreen() {
           </Text>
 
           <View style={{ height: 40 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }
@@ -394,6 +431,11 @@ const s = StyleSheet.create({
   notesInput: {
     color: 'white', fontSize: 14, minHeight: 80, textAlignVertical: 'top',
   },
+  billOfSaleBtn: {
+    marginTop: 8, paddingVertical: 14, borderRadius: 10,
+    borderWidth: 1, borderColor: GOLD, alignItems: 'center',
+  },
+  billOfSaleBtnTxt: { color: GOLD, fontSize: 15, fontWeight: '700' },
   deleteBtn: {
     marginTop: 8, paddingVertical: 14, borderRadius: 10,
     borderWidth: 1, borderColor: DANGER, alignItems: 'center',

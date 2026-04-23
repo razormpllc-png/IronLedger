@@ -1,10 +1,11 @@
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, KeyboardAvoidingView, Platform, Alert,
+  ScrollView, Alert, Linking,
   Image, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useEffect, useCallback } from 'react';
+import FormScrollView from '../components/FormScrollView';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import {
   getFirearmById, updateFirearm, resolveImageUri,
@@ -81,6 +82,7 @@ export default function EditFirearm() {
   const [dealerCityState, setDealerCityState] = useState('');
   const [storageLocation, setStorageLocation] = useState('');
   const [roundCount, setRoundCount] = useState('');
+  const [ownershipType, setOwnershipType] = useState<'personal' | 'business'>('personal');
   const [notes, setNotes] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
   // NFA
@@ -142,6 +144,7 @@ export default function EditFirearm() {
     setDealerCityState(f.dealer_city_state || '');
     setStorageLocation(f.storage_location || '');
     setRoundCount(f.round_count ? String(f.round_count) : '');
+    setOwnershipType((f.ownership_type as 'personal' | 'business') || 'personal');
     setNotes(f.notes || '');
     setImageUri(f.image_uri || null);
     setIsNfa(!!f.is_nfa || migratedNfaCats.length > 0);
@@ -445,6 +448,7 @@ export default function EditFirearm() {
       dealer_city_state: dealerCityState.trim() || undefined,
       storage_location: storageLocation.trim() || undefined,
       round_count: roundCount ? parseInt(roundCount) : 0,
+      ownership_type: ownershipType,
       value_last_updated: currentValue ? now : undefined,
       is_nfa: isNfa ? 1 : 0,
       nfa_form_type: nfaFormType || undefined,
@@ -465,22 +469,18 @@ export default function EditFirearm() {
 
   return (
     <SafeAreaView style={s.container}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={s.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={s.cancel}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={s.title}>Edit Firearm</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={s.save}>Save</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView
-          contentContainerStyle={s.scroll}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-        >
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={s.cancel}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={s.title}>Edit Firearm</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={s.save}>Save</Text>
+        </TouchableOpacity>
+      </View>
+      <FormScrollView
+        contentContainerStyle={s.scroll}
+      >
           <TouchableOpacity style={s.photoBox} onPress={pickImage} activeOpacity={0.8}>
             {imageUri ? (
               <View style={{ flex: 1 }}>
@@ -549,6 +549,19 @@ export default function EditFirearm() {
             ))}
           </View>
 
+          <Text style={s.sectionLabel}>OWNERSHIP</Text>
+          <View style={s.chipRow}>
+            {(['personal', 'business'] as const).map((o) => (
+              <TouchableOpacity key={o}
+                style={[s.chip, ownershipType === o && s.chipActive]}
+                onPress={() => setOwnershipType(o)}>
+                <Text style={[s.chipText, ownershipType === o && s.chipTextActive]}>
+                  {o === 'personal' ? 'Personal' : 'Business / FFL'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <Text style={s.sectionLabel}>ACQUISITION</Text>
           <View style={s.chipRow}>
             {ACQUISITION_METHODS.map((m) => (
@@ -575,6 +588,19 @@ export default function EditFirearm() {
               onPress={() => setCurrentValue(purchasePrice)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={s.linkBtnText}>Use purchase price as current value</Text>
+            </TouchableOpacity>
+          ) : null}
+          {(make || model) ? (
+            <TouchableOpacity
+              style={s.linkBtn}
+              onPress={() => {
+                const q = encodeURIComponent(`${make} ${model}`.trim());
+                Linking.openURL(`https://truegunvalue.com/search?q=${q}`).catch(() =>
+                  Linking.openURL(`https://www.google.com/search?q=site:truegunvalue.com+${q}`)
+                );
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={[s.linkBtnText, { color: '#4A90D9' }]}>Look up on TrueGunValue ›</Text>
             </TouchableOpacity>
           ) : null}
 
@@ -744,8 +770,7 @@ export default function EditFirearm() {
               multiline numberOfLines={4} textAlignVertical="top" />
           </View>
           <View style={{ height: 120 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }

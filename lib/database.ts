@@ -46,6 +46,20 @@ export function formatDate(raw: string | null): string | null {
   return `${months[m - 1]} ${d}, ${y}`;
 }
 
+/** Shorter date string (e.g. "Apr 22, 2026") — fits tighter UI cells. */
+export function formatDateShort(raw: string | null): string | null {
+  if (!raw) return null;
+  const full = formatDate(raw);
+  if (!full || full === raw) return full;
+  const shorts = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const months = ['January','February','March','April','May','June',
+    'July','August','September','October','November','December'];
+  for (let i = 0; i < months.length; i++) {
+    if (full.startsWith(months[i])) return full.replace(months[i], shorts[i]);
+  }
+  return full;
+}
+
 /** Get the document directory URI with trailing slash. */
 function getDocDirUri(): string {
   const uri = Paths.document.uri;
@@ -134,6 +148,31 @@ export function initDB() {
     db.runSync('ALTER TABLE ammo ADD COLUMN paired_firearm_ids TEXT');
   } catch (_) { /* column already exists */ }
 
+  // Reloading / handload fields
+  const reloadCols: Array<[string, string]> = [
+    ['is_handload', 'INTEGER DEFAULT 0'],
+    ['powder_brand', 'TEXT'],
+    ['powder_type', 'TEXT'],
+    ['charge_weight', 'REAL'],
+    ['bullet_brand', 'TEXT'],
+    ['bullet_weight', 'REAL'],
+    ['bullet_type', 'TEXT'],
+    ['brass_brand', 'TEXT'],
+    ['brass_times_fired', 'INTEGER'],
+    ['primer_brand', 'TEXT'],
+    ['primer_type', 'TEXT'],
+    ['coal', 'REAL'],
+    ['cbto', 'REAL'],
+    ['velocity_fps', 'REAL'],
+    ['velocity_sd', 'REAL'],
+    ['velocity_es', 'REAL'],
+    ['group_size', 'TEXT'],
+    ['load_notes', 'TEXT'],
+  ];
+  for (const [col, colType] of reloadCols) {
+    try { db.runSync(`ALTER TABLE ammo ADD COLUMN ${col} ${colType}`); } catch (_) {}
+  }
+
   // Add new firearm fields (migrations)
   const newFirearmCols = [
     ['nickname', 'TEXT'],
@@ -173,9 +212,28 @@ export function initDB() {
     ['maintenance_interval_months', 'INTEGER'],
     ['maintenance_interval_rounds', 'INTEGER'],
     ['maintenance_notification_id', 'TEXT'],
+    ['ownership_type', "TEXT DEFAULT 'personal'"],
   ];
   for (const [col, colType] of newFirearmCols) {
     try { db.runSync(`ALTER TABLE firearms ADD COLUMN ${col} ${colType}`); } catch (_) {}
+  }
+
+  // Add new range_sessions fields (migrations)
+  const newRangeSessionCols = [
+    ['session_type', "TEXT DEFAULT 'outdoor'"],
+    ['temperature', 'TEXT'],
+    ['humidity', 'TEXT'],
+    ['wind', 'TEXT'],
+    ['conditions', 'TEXT'],
+    ['match_name', 'TEXT'],
+    ['match_url', 'TEXT'],
+    ['division', 'TEXT'],
+    ['classification', 'TEXT'],
+    ['placement', 'TEXT'],
+    ['match_score', 'TEXT'],
+  ];
+  for (const [col, colType] of newRangeSessionCols) {
+    try { db.runSync(`ALTER TABLE range_sessions ADD COLUMN ${col} ${colType}`); } catch (_) {}
   }
 
   // Create accessories table
@@ -239,6 +297,8 @@ export function initDB() {
       atf_form_front_uri TEXT,
       atf_form_back_uri TEXT,
       atf_form_scanned_at TEXT,
+      end_cap_type TEXT,
+      end_cap_notes TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
   `);
@@ -248,6 +308,8 @@ export function initDB() {
     ['atf_form_front_uri', 'TEXT'],
     ['atf_form_back_uri', 'TEXT'],
     ['atf_form_scanned_at', 'TEXT'],
+    ['end_cap_type', 'TEXT'],
+    ['end_cap_notes', 'TEXT'],
   ];
   for (const [col, colType] of newSuppressorCols) {
     try { db.runSync(`ALTER TABLE suppressors ADD COLUMN ${col} ${colType}`); } catch (_) {}
@@ -379,6 +441,17 @@ export function initDB() {
       location TEXT,
       weather TEXT,
       notes TEXT,
+      session_type TEXT DEFAULT 'outdoor',
+      temperature TEXT,
+      humidity TEXT,
+      wind TEXT,
+      conditions TEXT,
+      match_name TEXT,
+      match_url TEXT,
+      division TEXT,
+      classification TEXT,
+      placement TEXT,
+      match_score TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -393,6 +466,76 @@ export function initDB() {
       FOREIGN KEY (firearm_id) REFERENCES firearms(id) ON DELETE CASCADE,
       FOREIGN KEY (ammo_id) REFERENCES ammo(id) ON DELETE SET NULL
     );
+
+    CREATE TABLE IF NOT EXISTS range_session_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      image_uri TEXT NOT NULL,
+      caption TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (session_id) REFERENCES range_sessions(id) ON DELETE CASCADE
+    );
+
+    -- Competition matches — full match tracking for USPSA, IDPA, Steel
+    -- Challenge, and outlaw matches. Separate from range_sessions so a
+    -- match can exist independently or link to a session.
+    CREATE TABLE IF NOT EXISTS competition_matches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_date TEXT NOT NULL,
+      match_name TEXT NOT NULL,
+      match_type TEXT NOT NULL DEFAULT 'USPSA',  -- USPSA, IDPA, Steel Challenge, Outlaw
+      practiscore_url TEXT,
+      location TEXT,
+      firearm_id INTEGER,
+      ammo_id INTEGER,
+      division TEXT,
+      classification TEXT,
+      overall_placement INTEGER,
+      division_placement INTEGER,
+      total_stages INTEGER,
+      overall_score REAL,
+      overall_hit_factor REAL,
+      squad_notes TEXT,
+      notes TEXT,
+      session_id INTEGER,   -- optional link to a range_session
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (firearm_id) REFERENCES firearms(id) ON DELETE SET NULL,
+      FOREIGN KEY (ammo_id) REFERENCES ammo(id) ON DELETE SET NULL,
+      FOREIGN KEY (session_id) REFERENCES range_sessions(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_comp_matches_date ON competition_matches(match_date);
+
+    -- Per-stage breakdown for competition matches
+    CREATE TABLE IF NOT EXISTS competition_stages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_id INTEGER NOT NULL,
+      stage_number INTEGER NOT NULL,
+      stage_name TEXT,
+      -- Scoring (USPSA-style)
+      points REAL,
+      time REAL,
+      hit_factor REAL,
+      penalties INTEGER DEFAULT 0,
+      -- USPSA hit counts
+      a_hits INTEGER,
+      c_hits INTEGER,
+      d_hits INTEGER,
+      m_hits INTEGER,       -- misses
+      ns_hits INTEGER,      -- no-shoots
+      procedural INTEGER DEFAULT 0,
+      -- IDPA scoring
+      points_down REAL,
+      stage_score REAL,
+      -- Steel Challenge
+      best_time REAL,
+      strings_json TEXT,   -- JSON array of individual string times
+      -- General
+      stage_placement INTEGER,
+      notes TEXT,
+      FOREIGN KEY (match_id) REFERENCES competition_matches(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_comp_stages_match ON competition_stages(match_id);
 
     -- Dispositions: the "exit" side of the FFL bound book. Polymorphic over
     -- firearms and suppressors via (item_kind, item_id) because the two
@@ -532,6 +675,7 @@ export interface Firearm {
   maintenance_interval_months: number | null;
   maintenance_interval_rounds: number | null;
   maintenance_notification_id: string | null;
+  ownership_type: string | null;  // 'personal' | 'business'
 }
 
 export interface MaintenanceLog {
@@ -582,6 +726,7 @@ export function addFirearm(data: {
   atf_form_status?: string | null; atf_control_number?: string | null; date_filed?: string | null;
   date_approved?: string | null; tax_paid_amount?: number | null; trust_type?: string | null;
   trust_name?: string | null; responsible_persons?: string | null; trust_id?: number | null;
+  ownership_type?: string | null;
 }): number {
   const result = db.runSync(
     `INSERT INTO firearms (make, model, caliber, serial_number, type, purchase_date, purchase_price,
@@ -589,8 +734,8 @@ export function addFirearm(data: {
      acquisition_method, purchased_from, dealer_city_state, storage_location, round_count,
      value_last_updated, is_nfa, nfa_form_type, nfa_item_category, atf_form_status,
      atf_control_number, date_filed, date_approved, tax_paid_amount, trust_type, trust_name,
-     responsible_persons, trust_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     responsible_persons, trust_id, ownership_type)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [data.make, data.model, data.caliber ?? null, data.serial_number ?? null, data.type ?? null,
      data.purchase_date ?? null, data.purchase_price ?? null, data.current_value ?? null,
      data.condition_rating ?? null, data.notes ?? null, data.image_uri ?? null,
@@ -601,7 +746,8 @@ export function addFirearm(data: {
      data.is_nfa ?? 0, data.nfa_form_type ?? null, data.nfa_item_category ?? null,
      data.atf_form_status ?? null, data.atf_control_number ?? null, data.date_filed ?? null,
      data.date_approved ?? null, data.tax_paid_amount ?? null, data.trust_type ?? null,
-     data.trust_name ?? null, data.responsible_persons ?? null, data.trust_id ?? null]
+     data.trust_name ?? null, data.responsible_persons ?? null, data.trust_id ?? null,
+     data.ownership_type ?? 'personal']
   );
   return result.lastInsertRowId as number;
 }
@@ -626,6 +772,7 @@ export function updateFirearm(id: number, data: {
   atf_form_status?: string | null; atf_control_number?: string | null; date_filed?: string | null;
   date_approved?: string | null; tax_paid_amount?: number | null; trust_type?: string | null;
   trust_name?: string | null; responsible_persons?: string | null; trust_id?: number | null;
+  ownership_type?: string | null;
 }) {
   db.runSync(
     `UPDATE firearms SET make=?, model=?, caliber=?, serial_number=?, type=?, purchase_date=?,
@@ -634,7 +781,7 @@ export function updateFirearm(id: number, data: {
      dealer_city_state=?, storage_location=?, round_count=?, value_last_updated=?,
      is_nfa=?, nfa_form_type=?, nfa_item_category=?, atf_form_status=?, atf_control_number=?,
      date_filed=?, date_approved=?, tax_paid_amount=?, trust_type=?, trust_name=?,
-     responsible_persons=?, trust_id=?
+     responsible_persons=?, trust_id=?, ownership_type=?
      WHERE id=?`,
     [data.make, data.model, data.caliber ?? null, data.serial_number ?? null, data.type ?? null,
      data.purchase_date ?? null, data.purchase_price ?? null, data.current_value ?? null,
@@ -646,7 +793,8 @@ export function updateFirearm(id: number, data: {
      data.is_nfa ?? 0, data.nfa_form_type ?? null, data.nfa_item_category ?? null,
      data.atf_form_status ?? null, data.atf_control_number ?? null, data.date_filed ?? null,
      data.date_approved ?? null, data.tax_paid_amount ?? null, data.trust_type ?? null,
-     data.trust_name ?? null, data.responsible_persons ?? null, data.trust_id ?? null, id]
+     data.trust_name ?? null, data.responsible_persons ?? null, data.trust_id ?? null,
+     data.ownership_type ?? 'personal', id]
   );
 }
 
@@ -843,6 +991,15 @@ export interface Ammo {
   rounds_per_box: number | null; low_stock_threshold: number | null;
   paired_firearm_ids: string | null;
   notes: string | null; created_at: string;
+  // Reloading / handload fields
+  is_handload: number;
+  powder_brand: string | null; powder_type: string | null; charge_weight: number | null;
+  bullet_brand: string | null; bullet_weight: number | null; bullet_type: string | null;
+  brass_brand: string | null; brass_times_fired: number | null;
+  primer_brand: string | null; primer_type: string | null;
+  coal: number | null; cbto: number | null;
+  velocity_fps: number | null; velocity_sd: number | null; velocity_es: number | null;
+  group_size: string | null; load_notes: string | null;
 }
 
 /** Parse the JSON-encoded paired_firearm_ids column into a number[]. Returns
@@ -864,20 +1021,42 @@ export function serializePairedFirearmIds(ids: number[] | null | undefined): str
   return JSON.stringify(ids);
 }
 
-export function addAmmo(data: {
+export interface AmmoInput {
   caliber: string; brand?: string | null; grain?: number | null; type?: string | null;
   quantity: number; cost_per_box?: number | null; rounds_per_box?: number | null;
   low_stock_threshold?: number | null; paired_firearm_ids?: number[] | null;
   notes?: string | null;
-}) {
+  // Reloading fields
+  is_handload?: number;
+  powder_brand?: string | null; powder_type?: string | null; charge_weight?: number | null;
+  bullet_brand?: string | null; bullet_weight?: number | null; bullet_type?: string | null;
+  brass_brand?: string | null; brass_times_fired?: number | null;
+  primer_brand?: string | null; primer_type?: string | null;
+  coal?: number | null; cbto?: number | null;
+  velocity_fps?: number | null; velocity_sd?: number | null; velocity_es?: number | null;
+  group_size?: string | null; load_notes?: string | null;
+}
+
+export function addAmmo(data: AmmoInput) {
   db.runSync(
-    `INSERT INTO ammo (caliber, brand, grain, type, quantity, cost_per_box, rounds_per_box, low_stock_threshold, paired_firearm_ids, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO ammo (caliber, brand, grain, type, quantity, cost_per_box, rounds_per_box,
+     low_stock_threshold, paired_firearm_ids, notes, is_handload, powder_brand, powder_type,
+     charge_weight, bullet_brand, bullet_weight, bullet_type, brass_brand, brass_times_fired,
+     primer_brand, primer_type, coal, cbto, velocity_fps, velocity_sd, velocity_es,
+     group_size, load_notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [data.caliber, data.brand ?? null, data.grain ?? null, data.type ?? null,
      data.quantity, data.cost_per_box ?? null, data.rounds_per_box ?? null,
      data.low_stock_threshold ?? 100,
      serializePairedFirearmIds(data.paired_firearm_ids),
-     data.notes ?? null]
+     data.notes ?? null, data.is_handload ?? 0,
+     data.powder_brand ?? null, data.powder_type ?? null, data.charge_weight ?? null,
+     data.bullet_brand ?? null, data.bullet_weight ?? null, data.bullet_type ?? null,
+     data.brass_brand ?? null, data.brass_times_fired ?? null,
+     data.primer_brand ?? null, data.primer_type ?? null,
+     data.coal ?? null, data.cbto ?? null,
+     data.velocity_fps ?? null, data.velocity_sd ?? null, data.velocity_es ?? null,
+     data.group_size ?? null, data.load_notes ?? null]
   );
 }
 
@@ -889,19 +1068,27 @@ export function getAmmoById(id: number): Ammo | null {
   return db.getFirstSync('SELECT * FROM ammo WHERE id = ?', [id]) as Ammo | null;
 }
 
-export function updateAmmo(id: number, data: {
-  caliber: string; brand?: string | null; grain?: number | null; type?: string | null;
-  quantity: number; cost_per_box?: number | null; rounds_per_box?: number | null;
-  low_stock_threshold?: number | null; paired_firearm_ids?: number[] | null;
-  notes?: string | null;
-}) {
+export function updateAmmo(id: number, data: AmmoInput) {
   db.runSync(
-    `UPDATE ammo SET caliber=?, brand=?, grain=?, type=?, quantity=?, cost_per_box=?, rounds_per_box=?, low_stock_threshold=?, paired_firearm_ids=?, notes=? WHERE id=?`,
+    `UPDATE ammo SET caliber=?, brand=?, grain=?, type=?, quantity=?, cost_per_box=?,
+     rounds_per_box=?, low_stock_threshold=?, paired_firearm_ids=?, notes=?,
+     is_handload=?, powder_brand=?, powder_type=?, charge_weight=?,
+     bullet_brand=?, bullet_weight=?, bullet_type=?,
+     brass_brand=?, brass_times_fired=?, primer_brand=?, primer_type=?,
+     coal=?, cbto=?, velocity_fps=?, velocity_sd=?, velocity_es=?,
+     group_size=?, load_notes=? WHERE id=?`,
     [data.caliber, data.brand ?? null, data.grain ?? null, data.type ?? null,
      data.quantity, data.cost_per_box ?? null, data.rounds_per_box ?? null,
      data.low_stock_threshold ?? 100,
      serializePairedFirearmIds(data.paired_firearm_ids),
-     data.notes ?? null, id]
+     data.notes ?? null, data.is_handload ?? 0,
+     data.powder_brand ?? null, data.powder_type ?? null, data.charge_weight ?? null,
+     data.bullet_brand ?? null, data.bullet_weight ?? null, data.bullet_type ?? null,
+     data.brass_brand ?? null, data.brass_times_fired ?? null,
+     data.primer_brand ?? null, data.primer_type ?? null,
+     data.coal ?? null, data.cbto ?? null,
+     data.velocity_fps ?? null, data.velocity_sd ?? null, data.velocity_es ?? null,
+     data.group_size ?? null, data.load_notes ?? null, id]
   );
 }
 
@@ -1373,6 +1560,9 @@ export interface Suppressor {
   atf_form_front_uri: string | null;
   atf_form_back_uri: string | null;
   atf_form_scanned_at: string | null;
+  // End cap configuration
+  end_cap_type: string | null;
+  end_cap_notes: string | null;
   created_at: string;
 }
 
@@ -1412,6 +1602,8 @@ export interface SuppressorInput {
   mount_type?: string | null;
   full_auto_rated?: number;
   host_notes?: string | null;
+  end_cap_type?: string | null;
+  end_cap_notes?: string | null;
 }
 
 const SUPPRESSOR_COLUMNS = [
@@ -1422,6 +1614,7 @@ const SUPPRESSOR_COLUMNS = [
   'date_approved', 'tax_paid_amount', 'tax_stamp_image', 'trust_type',
   'trust_name', 'responsible_persons', 'trust_id', 'length_inches', 'weight_oz',
   'thread_pitch', 'mount_type', 'full_auto_rated', 'host_notes',
+  'end_cap_type', 'end_cap_notes',
 ] as const;
 
 function suppressorInputToValues(data: SuppressorInput): unknown[] {
@@ -1437,6 +1630,7 @@ function suppressorInputToValues(data: SuppressorInput): unknown[] {
     data.responsible_persons ?? null, data.trust_id ?? null, data.length_inches ?? null,
     data.weight_oz ?? null, data.thread_pitch ?? null, data.mount_type ?? null,
     data.full_auto_rated ?? 0, data.host_notes ?? null,
+    data.end_cap_type ?? null, data.end_cap_notes ?? null,
   ];
 }
 
@@ -1935,6 +2129,17 @@ export interface RangeSession {
   location: string | null;
   weather: string | null;
   notes: string | null;
+  session_type: string | null;
+  temperature: string | null;
+  humidity: string | null;
+  wind: string | null;
+  conditions: string | null;
+  match_name: string | null;
+  match_url: string | null;
+  division: string | null;
+  classification: string | null;
+  placement: string | null;
+  match_score: string | null;
   created_at: string;
 }
 
@@ -2046,13 +2251,45 @@ interface SessionLineInput {
  *     (floored at 0 so overshoot doesn't produce negative stock).
  */
 export function addRangeSession(
-  session: { session_date: string; location?: string | null; weather?: string | null; notes?: string | null },
+  session: {
+    session_date: string;
+    location?: string | null;
+    weather?: string | null;
+    notes?: string | null;
+    session_type?: string | null;
+    temperature?: string | null;
+    humidity?: string | null;
+    wind?: string | null;
+    conditions?: string | null;
+    match_name?: string | null;
+    match_url?: string | null;
+    division?: string | null;
+    classification?: string | null;
+    placement?: string | null;
+    match_score?: string | null;
+  },
   lines: SessionLineInput[],
 ): number {
   const result = db.runSync(
-    `INSERT INTO range_sessions (session_date, location, weather, notes)
-     VALUES (?, ?, ?, ?)`,
-    [session.session_date, session.location ?? null, session.weather ?? null, session.notes ?? null],
+    `INSERT INTO range_sessions (session_date, location, weather, notes, session_type, temperature, humidity, wind, conditions, match_name, match_url, division, classification, placement, match_score)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      session.session_date,
+      session.location ?? null,
+      session.weather ?? null,
+      session.notes ?? null,
+      session.session_type ?? null,
+      session.temperature ?? null,
+      session.humidity ?? null,
+      session.wind ?? null,
+      session.conditions ?? null,
+      session.match_name ?? null,
+      session.match_url ?? null,
+      session.division ?? null,
+      session.classification ?? null,
+      session.placement ?? null,
+      session.match_score ?? null,
+    ],
   );
   const session_id = result.lastInsertRowId as number;
 
@@ -2086,7 +2323,23 @@ export function addRangeSession(
  */
 export function updateRangeSession(
   id: number,
-  session: { session_date: string; location?: string | null; weather?: string | null; notes?: string | null },
+  session: {
+    session_date: string;
+    location?: string | null;
+    weather?: string | null;
+    notes?: string | null;
+    session_type?: string | null;
+    temperature?: string | null;
+    humidity?: string | null;
+    wind?: string | null;
+    conditions?: string | null;
+    match_name?: string | null;
+    match_url?: string | null;
+    division?: string | null;
+    classification?: string | null;
+    placement?: string | null;
+    match_score?: string | null;
+  },
   lines: SessionLineInput[],
 ) {
   // 1. Reverse prior line side effects
@@ -2112,9 +2365,26 @@ export function updateRangeSession(
   // 2. Update the session row and wipe old lines
   db.runSync(
     `UPDATE range_sessions
-     SET session_date = ?, location = ?, weather = ?, notes = ?
+     SET session_date = ?, location = ?, weather = ?, notes = ?, session_type = ?, temperature = ?, humidity = ?, wind = ?, conditions = ?, match_name = ?, match_url = ?, division = ?, classification = ?, placement = ?, match_score = ?
      WHERE id = ?`,
-    [session.session_date, session.location ?? null, session.weather ?? null, session.notes ?? null, id],
+    [
+      session.session_date,
+      session.location ?? null,
+      session.weather ?? null,
+      session.notes ?? null,
+      session.session_type ?? null,
+      session.temperature ?? null,
+      session.humidity ?? null,
+      session.wind ?? null,
+      session.conditions ?? null,
+      session.match_name ?? null,
+      session.match_url ?? null,
+      session.division ?? null,
+      session.classification ?? null,
+      session.placement ?? null,
+      session.match_score ?? null,
+      id,
+    ],
   );
   db.runSync('DELETE FROM range_session_firearms WHERE session_id = ?', [id]);
 
@@ -2163,6 +2433,41 @@ export function deleteRangeSession(id: number) {
   }
   // Cascades clean up range_session_firearms via FK
   db.runSync('DELETE FROM range_sessions WHERE id = ?', [id]);
+}
+
+// ─── RANGE SESSION PHOTOS ───────────────────────────────────────
+
+export interface RangeSessionPhoto {
+  id: number;
+  session_id: number;
+  image_uri: string;
+  caption: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export function addRangeSessionPhoto(data: {
+  session_id: number;
+  image_uri: string;
+  caption?: string | null;
+  sort_order?: number | null;
+}): number {
+  const result = db.runSync(
+    'INSERT INTO range_session_photos (session_id, image_uri, caption, sort_order) VALUES (?, ?, ?, ?)',
+    [data.session_id, data.image_uri, data.caption ?? null, data.sort_order ?? 0]
+  );
+  return result.lastInsertRowId as number;
+}
+
+export function getRangeSessionPhotos(session_id: number): RangeSessionPhoto[] {
+  return db.getAllSync(
+    'SELECT * FROM range_session_photos WHERE session_id = ? ORDER BY sort_order ASC, created_at ASC',
+    [session_id]
+  ) as RangeSessionPhoto[];
+}
+
+export function deleteRangeSessionPhoto(id: number) {
+  db.runSync('DELETE FROM range_session_photos WHERE id = ?', [id]);
 }
 
 // ─── Dispositions (FFL bound book — transfers out) ──────────────────────
@@ -2513,4 +2818,214 @@ export function deleteDopeEntry(id: number): void {
   ) as { dope_card_id: number } | undefined;
   db.runSync('DELETE FROM dope_entries WHERE id = ?', [id]);
   if (row) touchDopeCard(row.dope_card_id);
+}
+
+// ─── Competition Matches ─────────────────────────────────────
+
+export const MATCH_TYPES = ['USPSA', 'IDPA', 'Steel Challenge', 'Outlaw'] as const;
+export type MatchType = typeof MATCH_TYPES[number];
+
+export const USPSA_DIVISIONS = ['Production', 'Carry Optics', 'Open', 'Limited', 'Single Stack', 'Revolver', 'PCC'] as const;
+export const IDPA_DIVISIONS = ['CCP', 'SSP', 'ESP', 'REV', 'CO', 'PCC'] as const;
+export const USPSA_CLASSES = ['GM', 'M', 'A', 'B', 'C', 'D', 'U'] as const;
+export const IDPA_CLASSES = ['DM', 'MA', 'EX', 'SS', 'MM', 'NV'] as const;
+
+export interface CompetitionMatch {
+  id: number;
+  match_date: string;
+  match_name: string;
+  match_type: string;
+  practiscore_url: string | null;
+  location: string | null;
+  firearm_id: number | null;
+  ammo_id: number | null;
+  division: string | null;
+  classification: string | null;
+  overall_placement: number | null;
+  division_placement: number | null;
+  total_stages: number | null;
+  overall_score: number | null;
+  overall_hit_factor: number | null;
+  squad_notes: string | null;
+  notes: string | null;
+  session_id: number | null;
+  created_at: string;
+}
+
+export interface CompetitionMatchWithMeta extends CompetitionMatch {
+  firearm_name: string | null;
+  stage_count: number;
+}
+
+export interface CompetitionStage {
+  id: number;
+  match_id: number;
+  stage_number: number;
+  stage_name: string | null;
+  points: number | null;
+  time: number | null;
+  hit_factor: number | null;
+  penalties: number;
+  a_hits: number | null;
+  c_hits: number | null;
+  d_hits: number | null;
+  m_hits: number | null;
+  ns_hits: number | null;
+  procedural: number;
+  points_down: number | null;
+  stage_score: number | null;
+  best_time: number | null;
+  strings_json: string | null;
+  stage_placement: number | null;
+  notes: string | null;
+}
+
+export interface CompetitionMatchInput {
+  match_date: string;
+  match_name: string;
+  match_type: string;
+  practiscore_url?: string | null;
+  location?: string | null;
+  firearm_id?: number | null;
+  ammo_id?: number | null;
+  division?: string | null;
+  classification?: string | null;
+  overall_placement?: number | null;
+  division_placement?: number | null;
+  total_stages?: number | null;
+  overall_score?: number | null;
+  overall_hit_factor?: number | null;
+  squad_notes?: string | null;
+  notes?: string | null;
+  session_id?: number | null;
+}
+
+export interface CompetitionStageInput {
+  match_id: number;
+  stage_number: number;
+  stage_name?: string | null;
+  points?: number | null;
+  time?: number | null;
+  hit_factor?: number | null;
+  penalties?: number;
+  a_hits?: number | null;
+  c_hits?: number | null;
+  d_hits?: number | null;
+  m_hits?: number | null;
+  ns_hits?: number | null;
+  procedural?: number;
+  points_down?: number | null;
+  stage_score?: number | null;
+  best_time?: number | null;
+  strings_json?: string | null;
+  stage_placement?: number | null;
+  notes?: string | null;
+}
+
+export function getAllCompetitionMatches(): CompetitionMatchWithMeta[] {
+  return db.getAllSync(
+    `SELECT m.*,
+       COALESCE(f.nickname, f.make || ' ' || f.model) as firearm_name,
+       (SELECT COUNT(*) FROM competition_stages WHERE match_id = m.id) as stage_count
+     FROM competition_matches m
+     LEFT JOIN firearms f ON f.id = m.firearm_id
+     ORDER BY m.match_date DESC, m.id DESC`
+  ) as CompetitionMatchWithMeta[];
+}
+
+export function getCompetitionMatchById(id: number): CompetitionMatch | null {
+  return db.getFirstSync(
+    'SELECT * FROM competition_matches WHERE id = ?', [id]
+  ) as CompetitionMatch | undefined ?? null;
+}
+
+export function insertCompetitionMatch(input: CompetitionMatchInput): number {
+  const result = db.runSync(
+    `INSERT INTO competition_matches
+     (match_date, match_name, match_type, practiscore_url, location, firearm_id, ammo_id,
+      division, classification, overall_placement, division_placement, total_stages,
+      overall_score, overall_hit_factor, squad_notes, notes, session_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [input.match_date, input.match_name, input.match_type,
+     input.practiscore_url ?? null, input.location ?? null,
+     input.firearm_id ?? null, input.ammo_id ?? null,
+     input.division ?? null, input.classification ?? null,
+     input.overall_placement ?? null, input.division_placement ?? null,
+     input.total_stages ?? null, input.overall_score ?? null,
+     input.overall_hit_factor ?? null, input.squad_notes ?? null,
+     input.notes ?? null, input.session_id ?? null]
+  );
+  return result.lastInsertRowId as number;
+}
+
+export function updateCompetitionMatch(id: number, input: CompetitionMatchInput): void {
+  db.runSync(
+    `UPDATE competition_matches SET
+     match_date=?, match_name=?, match_type=?, practiscore_url=?, location=?,
+     firearm_id=?, ammo_id=?, division=?, classification=?,
+     overall_placement=?, division_placement=?, total_stages=?,
+     overall_score=?, overall_hit_factor=?, squad_notes=?, notes=?, session_id=?
+     WHERE id=?`,
+    [input.match_date, input.match_name, input.match_type,
+     input.practiscore_url ?? null, input.location ?? null,
+     input.firearm_id ?? null, input.ammo_id ?? null,
+     input.division ?? null, input.classification ?? null,
+     input.overall_placement ?? null, input.division_placement ?? null,
+     input.total_stages ?? null, input.overall_score ?? null,
+     input.overall_hit_factor ?? null, input.squad_notes ?? null,
+     input.notes ?? null, input.session_id ?? null, id]
+  );
+}
+
+export function deleteCompetitionMatch(id: number): void {
+  db.runSync('DELETE FROM competition_matches WHERE id = ?', [id]);
+}
+
+// ─── Competition Stages ──────────────────────────────────────
+
+export function getStagesForMatch(matchId: number): CompetitionStage[] {
+  return db.getAllSync(
+    'SELECT * FROM competition_stages WHERE match_id = ? ORDER BY stage_number ASC',
+    [matchId]
+  ) as CompetitionStage[];
+}
+
+export function insertCompetitionStage(input: CompetitionStageInput): number {
+  const result = db.runSync(
+    `INSERT INTO competition_stages
+     (match_id, stage_number, stage_name, points, time, hit_factor, penalties,
+      a_hits, c_hits, d_hits, m_hits, ns_hits, procedural,
+      points_down, stage_score, best_time, strings_json, stage_placement, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [input.match_id, input.stage_number, input.stage_name ?? null,
+     input.points ?? null, input.time ?? null, input.hit_factor ?? null,
+     input.penalties ?? 0, input.a_hits ?? null, input.c_hits ?? null,
+     input.d_hits ?? null, input.m_hits ?? null, input.ns_hits ?? null,
+     input.procedural ?? 0, input.points_down ?? null, input.stage_score ?? null,
+     input.best_time ?? null, input.strings_json ?? null,
+     input.stage_placement ?? null, input.notes ?? null]
+  );
+  return result.lastInsertRowId as number;
+}
+
+export function updateCompetitionStage(id: number, input: CompetitionStageInput): void {
+  db.runSync(
+    `UPDATE competition_stages SET
+     stage_number=?, stage_name=?, points=?, time=?, hit_factor=?, penalties=?,
+     a_hits=?, c_hits=?, d_hits=?, m_hits=?, ns_hits=?, procedural=?,
+     points_down=?, stage_score=?, best_time=?, strings_json=?,
+     stage_placement=?, notes=?
+     WHERE id=?`,
+    [input.stage_number, input.stage_name ?? null,
+     input.points ?? null, input.time ?? null, input.hit_factor ?? null,
+     input.penalties ?? 0, input.a_hits ?? null, input.c_hits ?? null,
+     input.d_hits ?? null, input.m_hits ?? null, input.ns_hits ?? null,
+     input.procedural ?? 0, input.points_down ?? null, input.stage_score ?? null,
+     input.best_time ?? null, input.strings_json ?? null,
+     input.stage_placement ?? null, input.notes ?? null, id]
+  );
+}
+
+export function deleteCompetitionStage(id: number): void {
+  db.runSync('DELETE FROM competition_stages WHERE id = ?', [id]);
 }

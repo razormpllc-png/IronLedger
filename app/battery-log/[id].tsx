@@ -9,11 +9,12 @@
 
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, KeyboardAvoidingView, Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import FormScrollView from '../../components/FormScrollView';
 import {
   addBatteryLog, updateBatteryLog, deleteBatteryLog, getBatteryLogById,
   setBatteryNotificationId,
@@ -242,18 +243,17 @@ export default function BatteryLogEditor() {
 
   return (
     <SafeAreaView style={s.safe}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={s.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={s.cancel}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={s.title}>{isNew ? 'New Battery Log' : 'Edit Battery Log'}</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={s.save}>Save</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={s.cancel}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={s.title}>{isNew ? 'New Battery Log' : 'Edit Battery Log'}</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={s.save}>Save</Text>
+        </TouchableOpacity>
+      </View>
 
-        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <FormScrollView contentContainerStyle={s.scroll}>
           <Text style={s.sectionLabel}>DEVICE</Text>
           <View style={s.card}>
             <View style={s.fieldRow}>
@@ -378,8 +378,7 @@ export default function BatteryLogEditor() {
           )}
 
           <View style={{ height: 80 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }

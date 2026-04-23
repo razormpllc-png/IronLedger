@@ -24,6 +24,57 @@ const CATEGORY_ICONS: Record<string, string> = {
   'Cleaning Supplies': '🧹', 'Training': '📚', 'Storage': '🗄️', 'Insurance': '📋', 'Other': '📦',
 };
 
+// ── Ammo type inference from caliber ────────────────────────
+const SHOTGUN_RE = /\b(gauge|ga\.?|bore)\b|^\.410$/i;
+const RIFLE_RE = /\b(5\.56|\.223|\.308|7\.62|6\.5|\.300|\.30-06|\.270|\.243|\.204|\.22-250|\.338|\.375|\.416|\.458|\.50\s?bmg|6mm|6\.8|\.224|\.280|\.257|7mm|\.264|creedmoor|lapua|grendel|valkyrie|prc|blackout|win\s?mag|rem\s?mag|wsm|wssm|nosler)\b/i;
+
+type AmmoKind = 'handgun' | 'rifle' | 'shotgun';
+
+function inferAmmoKind(caliber: string): AmmoKind {
+  if (SHOTGUN_RE.test(caliber)) return 'shotgun';
+  if (RIFLE_RE.test(caliber)) return 'rifle';
+  return 'handgun';
+}
+
+/** Renders a tiny bullet / shell silhouette as pure Views (no images needed). */
+function BulletIcon({ kind, dimmed }: { kind: AmmoKind; dimmed?: boolean }) {
+  const opacity = dimmed ? 0.5 : 1;
+  if (kind === 'shotgun') {
+    // Shotgun shell — wide cylinder with brass base
+    return (
+      <View style={{ alignItems: 'center', justifyContent: 'center', opacity }}>
+        {/* Hull (red) */}
+        <View style={{ width: 14, height: 16, backgroundColor: '#C0392B', borderTopLeftRadius: 3, borderTopRightRadius: 3 }} />
+        {/* Brass base */}
+        <View style={{ width: 16, height: 6, backgroundColor: GOLD, borderBottomLeftRadius: 2, borderBottomRightRadius: 2 }} />
+      </View>
+    );
+  }
+  if (kind === 'rifle') {
+    // Rifle round — pointed bullet + long brass case
+    return (
+      <View style={{ alignItems: 'center', justifyContent: 'center', opacity }}>
+        {/* Bullet tip (pointed) */}
+        <View style={{ width: 0, height: 0, borderLeftWidth: 4, borderRightWidth: 4, borderBottomWidth: 6,
+          borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#D4912A' }} />
+        {/* Bullet body */}
+        <View style={{ width: 8, height: 4, backgroundColor: '#D4912A' }} />
+        {/* Case */}
+        <View style={{ width: 8, height: 14, backgroundColor: GOLD, borderBottomLeftRadius: 1, borderBottomRightRadius: 1 }} />
+      </View>
+    );
+  }
+  // Handgun — stubby round-nose bullet + short case (9mm style)
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center', opacity }}>
+      {/* Bullet (round nose) */}
+      <View style={{ width: 8, height: 5, backgroundColor: '#D4912A', borderTopLeftRadius: 4, borderTopRightRadius: 4 }} />
+      {/* Case */}
+      <View style={{ width: 8, height: 10, backgroundColor: GOLD, borderBottomLeftRadius: 1, borderBottomRightRadius: 1 }} />
+    </View>
+  );
+}
+
 function fmt(n: number) {
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -34,10 +85,13 @@ function AmmoCard({ item, onPress, onDelete }: { item: Ammo; onPress: () => void
   const threshold = item.low_stock_threshold ?? 100;
   const isLow = item.quantity <= threshold && item.quantity > 0;
   const isEmpty = item.quantity === 0;
+  const kind = inferAmmoKind(item.caliber);
   return (
     <TouchableOpacity style={[s.card, isLow && s.cardLow, isEmpty && s.cardEmpty]} onPress={onPress} activeOpacity={0.75}>
       <View style={[s.ammoIcon, isLow && s.ammoIconLow, isEmpty && s.ammoIconEmpty]}>
-        <Text style={s.ammoIconText}>{isEmpty ? '⚠️' : isLow ? '⚡' : '🎯'}</Text>
+        {isEmpty ? <Text style={s.ammoIconText}>⚠️</Text>
+        : isLow ? <Text style={s.ammoIconText}>⚡</Text>
+        : <BulletIcon kind={kind} />}
       </View>
       <View style={s.cardBody}>
         <Text style={s.cardTitle}>{item.caliber}{item.grain ? ` ${item.grain}gr` : ''}</Text>

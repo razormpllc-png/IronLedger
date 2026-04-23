@@ -24,10 +24,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Modal, TextInput, KeyboardAvoidingView, Platform, Alert,
+  Modal, TextInput, KeyboardAvoidingView, Platform, Alert, ActionSheetIOS,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 import {
   getDopeCardById, getFirearmById, deleteDopeCard,
   getDopeEntriesForCard, insertDopeEntry, updateDopeEntry, deleteDopeEntry,
@@ -132,6 +135,96 @@ export default function DopeDetailScreen() {
     );
   }
 
+  // ── Export helpers ──────────────────────────────────────────
+  async function exportAsCSV() {
+    if (!card) return;
+    const unitLabel = card.units === 'moa' ? 'MOA' : card.units === 'mils' ? 'MILS' : 'IPHY';
+    const rows: string[] = [
+      `"Distance (yd)","Elevation (${unitLabel})","Windage (${unitLabel})","Notes"`,
+    ];
+    for (const e of entries) {
+      const dist = String(e.distance_yards);
+      const elev = e.elevation != null ? String(e.elevation) : '';
+      const wind = e.windage != null ? String(e.windage) : '';
+      const notes = (e.notes ?? '').replace(/"/g, '""');
+      rows.push(`${dist},${elev},${wind},"${notes}"`);
+    }
+    const csv = rows.join('\n');
+    const filename = `${card.name.replace(/[^a-zA-Z0-9]/g, '_')}_DOPE.csv`;
+    const path = `${FileSystem.cacheDirectory}${filename}`;
+    await FileSystem.writeAsStringAsync(path, csv);
+    await Sharing.shareAsync(path, { mimeType: 'text/csv', UTI: 'public.comma-separated-values-text' });
+  }
+
+  async function exportAsPDF() {
+    if (!card) return;
+    const unitLabel = card.units === 'moa' ? 'MOA' : card.units === 'mils' ? 'MILS' : 'IPHY';
+    const gunDesc = rifleScopeDesc || 'Unknown Firearm';
+    const entryRows = entries.map((e) => `
+      <tr>
+        <td style="font-weight:700;text-align:center">${e.distance_yards}</td>
+        <td style="text-align:center">${e.elevation ?? '—'}</td>
+        <td style="text-align:center">${e.windage ?? '—'}</td>
+        <td style="font-size:9px;color:#555">${e.notes ?? ''}</td>
+      </tr>`).join('');
+
+    const html = `
+      <html><head><style>
+        body { font-family: 'Courier New', monospace; margin: 20px; color: #111; }
+        h1 { font-size: 18px; text-transform: uppercase; letter-spacing: 2px; border-bottom: 3px solid #000; padding-bottom: 6px; margin-bottom: 4px; }
+        .meta { font-size: 11px; color: #444; margin-bottom: 16px; }
+        .meta span { margin-right: 18px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        th { background: #111; color: #fff; padding: 6px 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; text-align: center; }
+        td { padding: 6px 8px; border-bottom: 1px solid #ccc; font-size: 12px; }
+        tr:nth-child(even) { background: #f5f1e6; }
+        .footer { margin-top: 20px; font-size: 9px; color: #999; text-align: center; }
+      </style></head><body>
+        <h1>${card.name}</h1>
+        <div class="meta">
+          <span><b>Firearm:</b> ${gunDesc}</span>
+          ${card.ammo_description ? `<span><b>Ammo:</b> ${card.ammo_description}</span>` : ''}
+          ${card.zero_distance_yards ? `<span><b>Zero:</b> ${card.zero_distance_yards} yd</span>` : ''}
+          <span><b>Units:</b> ${unitLabel}</span>
+        </div>
+        <table>
+          <tr>
+            <th style="width:15%">Dist (yd)</th>
+            <th style="width:20%">Elev (${unitLabel})</th>
+            <th style="width:20%">Wind (${unitLabel})</th>
+            <th>Notes</th>
+          </tr>
+          ${entryRows}
+        </table>
+        <div class="footer">Exported from Iron Ledger</div>
+      </body></html>
+    `;
+
+    const { uri } = await Print.printToFileAsync({ html });
+    await Sharing.shareAsync(uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });
+  }
+
+  function handleExport() {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Export as PDF', 'Export as CSV', 'Cancel'],
+          cancelButtonIndex: 2,
+        },
+        (idx) => {
+          if (idx === 0) exportAsPDF().catch((e) => Alert.alert('Export Failed', String(e)));
+          if (idx === 1) exportAsCSV().catch((e) => Alert.alert('Export Failed', String(e)));
+        },
+      );
+    } else {
+      Alert.alert('Export DOPE Card', 'Choose a format', [
+        { text: 'PDF', onPress: () => exportAsPDF().catch((e) => Alert.alert('Export Failed', String(e))) },
+        { text: 'CSV', onPress: () => exportAsCSV().catch((e) => Alert.alert('Export Failed', String(e))) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
+  }
+
   if (!card) {
     return <SafeAreaView style={s.container} />;
   }
@@ -143,9 +236,14 @@ export default function DopeDetailScreen() {
           <Text style={s.back}>‹ Back</Text>
         </TouchableOpacity>
         <Text style={s.headerTitle} numberOfLines={1}>{card.name}</Text>
-        <TouchableOpacity onPress={() => router.push(`/dope-card?id=${card.id}`)}>
-          <Text style={s.edit}>Edit</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 14 }}>
+          <TouchableOpacity onPress={handleExport}>
+            <Text style={s.edit}>⇪</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push(`/dope-card?id=${card.id}`)}>
+            <Text style={s.edit}>Edit</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView style={s.content} showsVerticalScrollIndicator={false}>

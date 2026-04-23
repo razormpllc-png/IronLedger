@@ -3,10 +3,7 @@ import {
   View,
   Text,
   TextInput,
-  ScrollView,
-  KeyboardAvoidingView,
   TouchableOpacity,
-  Platform,
   Alert,
   StyleSheet,
 } from 'react-native';
@@ -15,6 +12,7 @@ import { router } from 'expo-router';
 import { addExpense, getAllFirearms, Firearm, EXPENSE_CATEGORIES } from '../lib/database';
 import { useAutoSave } from '../lib/useDraft';
 import SuggestionRow from '../components/SuggestionRow';
+import FormScrollView from '../components/FormScrollView';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -107,29 +105,22 @@ export default function AddExpenseScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardAvoid}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Add Expense</Text>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={styles.saveText}>Save</Text>
-          </TouchableOpacity>
-        </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={styles.cancelText}>Cancel</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Add Expense</Text>
+        <TouchableOpacity onPress={handleSave}>
+          <Text style={styles.saveText}>Save</Text>
+        </TouchableOpacity>
+      </View>
 
-        {/* Content */}
-        <ScrollView
-          style={styles.content}
-          contentContainerStyle={{ paddingBottom: 120 }}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-        >
+      {/* Content */}
+      <FormScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: 120 }}
+      >
           {/* Expense Details Section */}
           <Text style={styles.sectionLabel}>EXPENSE DETAILS</Text>
           <View style={styles.card}>
@@ -253,8 +244,7 @@ export default function AddExpenseScreen() {
           </View>
 
           <View style={styles.bottomSpacer} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
     </SafeAreaView>
   );
 }
