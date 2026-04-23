@@ -619,7 +619,7 @@ export default function AddSessionScreen() {
                   />
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </FormScrollView>
           ) : (
             <TouchableOpacity style={s.photoEmpty} onPress={handleAddPhoto}>
               <Text style={s.photoEmptyText}>Tap to add session photos</Text>
@@ -696,7 +696,7 @@ export default function AddSessionScreen() {
                 {pickerKind === 'ammo' && ammoLots.length === 0 ? (
                   <Text style={s.emptyPicker}>No ammo lots yet.</Text>
                 ) : null}
-              </ScrollView>
+              </FormScrollView>
               <TouchableOpacity
                 style={[s.modalBtn, s.modalBtnGhost]}
                 onPress={() => setPickerOpen(false)}
