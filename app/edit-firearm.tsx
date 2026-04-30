@@ -10,6 +10,7 @@ import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import {
   getFirearmById, updateFirearm, resolveImageUri,
   getAllNfaTrusts, setFirearmTaxStamp, setFirearmAtfForm,
+  resetBraceReclassificationDismissalIfReSbred,
 } from '../lib/database';
 import type { NfaTrust } from '../lib/database';
 import { syncWidgets } from '../lib/widgetSync';
@@ -429,6 +430,13 @@ export default function EditFirearm() {
 
   function persistFirearm() {
     const now = new Date().toISOString().slice(0, 10);
+    // Snapshot the prior nfa_item_category so we can detect a manual
+    // re-add of 'SBR' after the write — that's the trigger to reset
+    // brace_reclassification_dismissed so the detail-screen banner can
+    // surface again.
+    const prev = getFirearmById(Number(id));
+    const prevCategory = prev?.nfa_item_category ?? null;
+    const nextCategory = nfaCategories.length ? nfaCategories.join(', ') : null;
     updateFirearm(Number(id), {
       make: make.trim(), model: model.trim(),
       caliber: caliber.trim() || undefined,
@@ -463,6 +471,7 @@ export default function EditFirearm() {
       responsible_persons: pickedTrust?.responsible_persons ?? (responsiblePersons.trim() || undefined),
       trust_id: trustId ?? undefined,
     });
+    resetBraceReclassificationDismissalIfReSbred(Number(id), prevCategory, nextCategory);
     syncWidgets();
     router.back();
   }

@@ -18,6 +18,8 @@ import {
   getDispositionForItem,
   getLatestMaintenanceDate,
   setFirearmMaintenanceInterval, setFirearmMaintenanceNotificationId,
+  firearmIsSbr, hasBraceAccessory,
+  applyBraceReclassification, dismissBraceReclassification,
   Firearm, MaintenanceLog, Accessory, FirearmPhoto, BatteryLog, BatteryLogWithFirearm,
   AccessoryWithHost, Ammo, Suppressor, Disposition,
 } from '../../lib/database';
@@ -36,6 +38,7 @@ import { syncWidgets } from '../../lib/widgetSync';
 import { useEntitlements } from '../../lib/useEntitlements';
 import { showPaywall } from '../../lib/paywall';
 import AtfFormSection from '../../components/AtfFormSection';
+import BraceReclassificationBanner from '../../components/BraceReclassificationBanner';
 import * as ImagePicker from 'expo-image-picker';
 import { File, Directory, Paths } from 'expo-file-system';
 
@@ -620,6 +623,28 @@ export default function FirearmDetail() {
   const displayName = firearm.nickname || `${firearm.make} ${firearm.model}`;
   const subtitle = firearm.nickname ? `${firearm.make} ${firearm.model}` : null;
 
+  // ATF Rule 11P prompt — fires once per firearm when it's currently
+  // classified as an SBR and carries a brace accessory. Dismissal flag
+  // lives on the firearm row; if the user manually re-flips back to SBR
+  // via edit-firearm, the flag is reset there so this re-surfaces.
+  const showBraceBanner = !firearm.brace_reclassification_dismissed
+    && firearmIsSbr(firearm)
+    && hasBraceAccessory(accessories);
+
+  function handleUpdateToPistol() {
+    applyBraceReclassification(firearm!.id);
+    reloadFirearm();
+    Alert.alert(
+      'Reclassified as Pistol',
+      'Your form record has been preserved.',
+    );
+  }
+
+  function handleKeepAsSbr() {
+    dismissBraceReclassification(firearm!.id);
+    reloadFirearm();
+  }
+
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
@@ -631,6 +656,11 @@ export default function FirearmDetail() {
         </TouchableOpacity>
       </View>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
+        <BraceReclassificationBanner
+          visible={showBraceBanner}
+          onUpdateToPistol={handleUpdateToPistol}
+          onKeepAsSbr={handleKeepAsSbr}
+        />
         <View style={s.hero}>
           {firearm.image_uri ? (
             <Image source={{ uri: resolveImageUri(firearm.image_uri) ?? undefined }} style={s.heroImage} />

@@ -284,14 +284,27 @@ function NfaRow({
     meta = 'Not yet filed';
   }
 
+  // Superseded ATF form records (post brace-reclassification) stay visible
+  // here as historical audit rows but render dimmed with a clear badge.
+  const superseded = entry.kind === 'firearm' && !!entry.item.superseded;
+
   return (
-    <TouchableOpacity style={[s.row, !last && s.rowBorder]} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity
+      style={[s.row, !last && s.rowBorder, superseded && s.rowSuperseded]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
       <View style={{ flex: 1 }}>
         <View style={s.rowTitleRow}>
           <Text style={s.rowName} numberOfLines={1}>{name}</Text>
           {entry.kind === 'suppressor' ? (
             <View style={s.kindBadge}>
               <Text style={s.kindBadgeText}>SUPPRESSOR</Text>
+            </View>
+          ) : null}
+          {superseded ? (
+            <View style={s.supersededBadge}>
+              <Text style={s.supersededBadgeText}>SUPERSEDED</Text>
             </View>
           ) : null}
         </View>
@@ -338,6 +351,12 @@ const s = StyleSheet.create({
     paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
   },
   kindBadgeText: { color: GOLD, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  supersededBadge: {
+    backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: MUTED,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+  },
+  supersededBadgeText: { color: MUTED, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  rowSuperseded: { opacity: 0.55 },
 
   sumCard: {
     flex: 1, backgroundColor: SURFACE, borderRadius: 12, padding: 14,

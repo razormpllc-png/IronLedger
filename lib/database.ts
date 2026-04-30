@@ -213,6 +213,18 @@ export function initDB() {
     ['maintenance_interval_rounds', 'INTEGER'],
     ['maintenance_notification_id', 'TEXT'],
     ['ownership_type', "TEXT DEFAULT 'personal'"],
+    // Brace reclassification (ATF Rule 11P). One-time prompt on the firearm
+    // detail screen invites SBR-classified firearms with a brace accessory
+    // to revert to Handgun. Dismissal is persisted so the banner only fires
+    // once per firearm; if the user later re-flags the firearm as SBR via
+    // edit-firearm, edit-firearm resets this flag so the prompt can re-surface.
+    ['brace_reclassification_dismissed', 'INTEGER DEFAULT 0'],
+    // ATF form supersession — set when the user reclassifies an SBR back to
+    // Handgun. The firearm row is the ATF form record (atf_form_* fields live
+    // on it) so we tag the row itself instead of deleting any audit data.
+    ['superseded', 'INTEGER DEFAULT 0'],
+    ['superseded_reason', 'TEXT'],
+    ['superseded_date', 'TEXT'],
   ];
   for (const [col, colType] of newFirearmCols) {
     try { db.runSync(`ALTER TABLE firearms ADD COLUMN ${col} ${colType}`); } catch (_) {}
@@ -676,6 +688,11 @@ export interface Firearm {
   maintenance_interval_rounds: number | null;
   maintenance_notification_id: string | null;
   ownership_type: string | null;  // 'personal' | 'business'
+  // ATF Rule 11P brace reclassification — see migration block in initDB.
+  brace_reclassification_dismissed: number;
+  superseded: number;
+  superseded_reason: string | null;
+  superseded_date: string | null;
 }
 
 export interface MaintenanceLog {
@@ -1803,8 +1820,10 @@ export function countFirearmsForTrust(trust_id: number): number {
 }
 
 export function getAllNfaItems(): Firearm[] {
+  // Superseded firearms (post brace-reclassification) are kept in the NFA
+  // list as historical/audit rows even though they no longer carry is_nfa = 1.
   return db.getAllSync(
-    'SELECT * FROM firearms WHERE is_nfa = 1 ORDER BY date_filed DESC, created_at DESC'
+    'SELECT * FROM firearms WHERE is_nfa = 1 OR superseded = 1 ORDER BY date_filed DESC, created_at DESC'
   ) as Firearm[];
 }
 
@@ -1837,6 +1856,103 @@ export function getPendingNfaSuppressors(): Suppressor[] {
  *  through every addFirearm/updateFirearm signature. */
 export function setFirearmTaxStamp(id: number, imagePath: string | null) {
   db.runSync('UPDATE firearms SET tax_stamp_image = ? WHERE id = ?', [imagePath, id]);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// ATF Rule 11P brace reclassification helpers.
+//
+// When ATF Rule 11P repealed the pistol-brace SBR designation, firearms
+// previously classified as SBRs solely because of a brace can revert to
+// "Handgun" (the codebase's pistol equivalent). The firearm detail screen
+// surfaces a one-time banner; these helpers commit the user's choice.
+// ────────────────────────────────────────────────────────────────────────
+
+/** Returns true when this firearm's nfa_item_category list contains 'SBR'.
+ *  The column is comma-separated (set in edit-firearm with `.join(', ')`). */
+export function firearmIsSbr(f: Pick<Firearm, 'nfa_item_category'>): boolean {
+  if (!f.nfa_item_category) return false;
+  return f.nfa_item_category.split(',').map(s => s.trim()).includes('SBR');
+}
+
+/** Returns true when at least one of the supplied accessories looks like
+ *  a brace — either accessory_type === 'Stock / Brace' (the canonical
+ *  enum) or its name contains 'brace' (case-insensitive). */
+export function hasBraceAccessory(accessories: Pick<Accessory, 'accessory_type' | 'make' | 'model'>[]): boolean {
+  return accessories.some(a => {
+    if (a.accessory_type === 'Stock / Brace') return true;
+    const name = `${a.make ?? ''} ${a.model ?? ''}`.toLowerCase();
+    return name.includes('brace');
+  });
+}
+
+/** "Keep as SBR": persist the dismissal so the banner won't surface again
+ *  unless the user manually re-flags this firearm as SBR via edit-firearm. */
+export function dismissBraceReclassification(id: number) {
+  db.runSync(
+    'UPDATE firearms SET brace_reclassification_dismissed = 1 WHERE id = ?',
+    [id],
+  );
+}
+
+/** "Update to Pistol": flip the firearm to Handgun, drop the SBR
+ *  sub-classification, and mark the firearm's ATF form record as
+ *  superseded. ATF form fields (status, control number, scans) are
+ *  preserved as immutable audit data — only the supersession flag is set.
+ *  Setting is_nfa = 0 removes it from active NFA tracking; the
+ *  getAllNfaItems query keeps superseded rows visible for history. */
+export function applyBraceReclassification(id: number) {
+  const f = getFirearmById(id);
+  if (!f) return;
+
+  // Replace 'SBR' inside the comma-separated category list. If nothing
+  // else remains, null the field. This preserves edge cases where a
+  // firearm somehow carries multiple NFA categories.
+  const remaining = (f.nfa_item_category ?? '')
+    .split(',').map(s => s.trim()).filter(s => s && s !== 'SBR');
+  const nextCategory = remaining.length ? remaining.join(', ') : null;
+
+  // Flip the primary type to Handgun. The type column is comma-separated
+  // (multi-select chips); replace any Rifle/SBR-leaning value with
+  // Handgun while preserving other tags the user picked.
+  const typeParts = (f.type ?? '')
+    .split(',').map(s => s.trim()).filter(Boolean)
+    .filter(t => t !== 'Rifle' && t !== 'SBR');
+  if (!typeParts.includes('Handgun')) typeParts.unshift('Handgun');
+  const nextType = typeParts.join(', ');
+
+  const isStillNfa = remaining.length > 0 ? 1 : 0;
+  const now = new Date().toISOString();
+
+  db.runSync(
+    `UPDATE firearms SET
+       type = ?,
+       nfa_item_category = ?,
+       is_nfa = ?,
+       superseded = 1,
+       superseded_reason = ?,
+       superseded_date = ?,
+       brace_reclassification_dismissed = 1
+     WHERE id = ?`,
+    [nextType, nextCategory, isStillNfa, 'Brace reclassification — ATF Rule 11P', now, id],
+  );
+}
+
+/** When the user manually re-adds 'SBR' to nfa_item_category in
+ *  edit-firearm, reset the dismissal so the banner re-surfaces on the
+ *  detail screen. Called from edit-firearm's persist path. */
+export function resetBraceReclassificationDismissalIfReSbred(
+  id: number,
+  prevCategory: string | null,
+  nextCategory: string | null,
+) {
+  const had = (prevCategory ?? '').split(',').map(s => s.trim()).includes('SBR');
+  const has = (nextCategory ?? '').split(',').map(s => s.trim()).includes('SBR');
+  if (!had && has) {
+    db.runSync(
+      'UPDATE firearms SET brace_reclassification_dismissed = 0 WHERE id = ?',
+      [id],
+    );
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────
