@@ -176,7 +176,7 @@ export async function writeBackupToCache(backup: BackupFile): Promise<string> {
   const stamp = backup.exportedAt.slice(0, 10); // YYYY-MM-DD
   const path = `${Paths.cache.uri}ironledger-backup-${stamp}.json`;
   await FileSystem.writeAsStringAsync(path, JSON.stringify(backup), {
-    encoding: FileSystem.EncodingType.UTF8,
+    encoding: 'utf8',
   });
   return path;
 }
@@ -341,7 +341,7 @@ export async function importFromJson(raw: string | BackupFile): Promise<RestoreR
 /** Read a file URI and hand it to importFromJson. Convenience wrapper. */
 export async function importFromFile(uri: string): Promise<RestoreResult> {
   const raw = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.UTF8,
+    encoding: 'utf8',
   });
   return importFromJson(raw);
 }

@@ -20,6 +20,7 @@ import {
 } from '../lib/importParser';
 import { addFirearm } from '../lib/database';
 import { syncWidgets } from '../lib/widgetSync';
+import { useFeatureGate } from '../hooks/useFeatureGate';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -32,6 +33,7 @@ const DANGER = '#FF5722';
 type Step = 'pick' | 'map' | 'preview' | 'done';
 
 export default function ImportScreen() {
+  useFeatureGate('vault');
   const [step, setStep] = useState<Step>('pick');
   const [loading, setLoading] = useState(false);
   const [fileName, setFileName] = useState('');
@@ -80,7 +82,7 @@ export default function ImportScreen() {
 
       // Read the file as text
       const content = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: FileSystem.EncodingType.UTF8,
+        encoding: 'utf8',
       });
 
       if (!content.trim()) {
