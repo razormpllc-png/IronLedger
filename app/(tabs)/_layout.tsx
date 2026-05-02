@@ -1,6 +1,5 @@
 import { Tabs } from 'expo-router';
 import { Text, Image } from 'react-native';
-import { ArmoryIcon } from '../../components/ArmoryIcon';
 
 const AppIcon = require('../../assets/Icon.png');
 
@@ -43,7 +42,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Armory',
-          tabBarIcon: ({ color, focused }) => <ArmoryIcon size={24} color={color} focused={focused} />,
+          tabBarIcon: () => <TabIcon symbol="🛡" />,
         }}
       />
       <Tabs.Screen

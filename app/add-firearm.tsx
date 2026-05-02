@@ -17,6 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { File, Directory, Paths } from 'expo-file-system';
 import { useEntitlements } from '../lib/useEntitlements';
 import { showPaywall, runProGated } from '../lib/paywall';
+import { useSubscription } from '../hooks/useSubscription';
 import { scanAtfForm } from '../lib/atfOcr';
 import type { AtfExtracted } from '../lib/atfOcr';
 import { scanReceipt } from '../lib/receiptOcr';
@@ -67,6 +68,7 @@ async function saveImagePermanently(uri: string): Promise<string> {
 
 export default function AddFirearm() {
   const ent = useEntitlements();
+  const subscription = useSubscription();
   const [nickname, setNickname] = useState('');
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
@@ -625,6 +627,11 @@ export default function AddFirearm() {
       Alert.alert('Required Fields', 'Make and Model are required.');
       return;
     }
+    // Free-tier hard cap: combined firearms + suppressors.
+    if (!subscription.canAddItem()) {
+      showPaywall({ mode: 'hard_cap', reason: 'firearm_limit' });
+      return;
+    }
     // Soft NFA validation — warn if key ATF fields are blank so the user
     // can go back and fill them, but don't block the save.
     if (isNfa && (!nfaFormType || !atfStatus)) {
@@ -890,10 +897,10 @@ export default function AddFirearm() {
             <TouchableOpacity
               style={styles.linkBtn}
               onPress={() => {
+                // TrueGunValue has no generic /search endpoint (404s).
+                // Google site-search reliably lands on matching TGV pages.
                 const q = encodeURIComponent(`${make} ${model}`.trim());
-                Linking.openURL(`https://truegunvalue.com/search?q=${q}`).catch(() =>
-                  Linking.openURL(`https://www.google.com/search?q=site:truegunvalue.com+${q}`)
-                );
+                Linking.openURL(`https://www.google.com/search?q=site%3Atruegunvalue.com+${q}`);
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={[styles.linkBtnText, { color: '#4A90D9' }]}>Look up on TrueGunValue ›</Text>

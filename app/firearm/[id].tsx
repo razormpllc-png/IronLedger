@@ -777,10 +777,10 @@ export default function FirearmDetail() {
           <TouchableOpacity
             style={{ paddingHorizontal: 14, paddingVertical: 8 }}
             onPress={() => {
-              const q = encodeURIComponent(`${firearm.make} ${firearm.model}`);
-              Linking.openURL(`https://truegunvalue.com/search?q=${q}`).catch(() =>
-                Linking.openURL(`https://www.google.com/search?q=site:truegunvalue.com+${q}`)
-              );
+              // TrueGunValue has no generic /search endpoint (404s).
+              // Google site-search reliably lands on matching TGV pages.
+              const q = encodeURIComponent(`${firearm.make} ${firearm.model}`.trim());
+              Linking.openURL(`https://www.google.com/search?q=site%3Atruegunvalue.com+${q}`);
             }}
           >
             <Text style={{ color: '#4A90D9', fontSize: 13, fontWeight: '600' }}>

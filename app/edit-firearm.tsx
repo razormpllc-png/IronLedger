@@ -594,10 +594,10 @@ export default function EditFirearm() {
             <TouchableOpacity
               style={s.linkBtn}
               onPress={() => {
+                // TrueGunValue has no generic /search endpoint (404s).
+                // Google site-search reliably lands on matching TGV pages.
                 const q = encodeURIComponent(`${make} ${model}`.trim());
-                Linking.openURL(`https://truegunvalue.com/search?q=${q}`).catch(() =>
-                  Linking.openURL(`https://www.google.com/search?q=site:truegunvalue.com+${q}`)
-                );
+                Linking.openURL(`https://www.google.com/search?q=site%3Atruegunvalue.com+${q}`);
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={[s.linkBtnText, { color: '#4A90D9' }]}>Look up on TrueGunValue ›</Text>

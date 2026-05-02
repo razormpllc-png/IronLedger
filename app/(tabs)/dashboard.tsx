@@ -108,9 +108,9 @@ function composeLogLabel(log: BatteryLogWithFirearm): { acc: string; firearm: st
 }
 
 const TIER_OPTIONS: { key: Tier; label: string }[] = [
-  { key: 'lite', label: 'Lite' },
-  { key: 'pro', label: 'Pro' },
-  { key: 'founders', label: 'Founders' },
+  { key: 'free', label: 'Free' },
+  { key: 'vault', label: 'Vault' },
+  { key: 'vaultpro', label: 'Vault Pro' },
 ];
 
 export default function DashboardScreen() {
@@ -520,7 +520,7 @@ export default function DashboardScreen() {
               {ent.isPro ? (
                 <View style={s.proPill}>
                   <Text style={s.proPillText}>
-                    {ent.tier === 'founders' ? 'FOUNDER' : 'PRO'}
+                    {ent.tier === 'vaultpro' ? 'VAULT PRO' : 'VAULT'}
                   </Text>
                 </View>
               ) : null}
@@ -546,6 +546,23 @@ export default function DashboardScreen() {
               <Text style={s.insuranceTitle}>Backup & Restore</Text>
             </View>
             <Text style={s.insuranceSub}>Save or restore your entire armory as JSON</Text>
+          </View>
+          <Text style={s.insuranceChevron}>›</Text>
+        </TouchableOpacity>
+
+        {/* Import from Spreadsheet — on-demand CSV/TSV import. Mirror entry
+            point from Armory + so users don't have to dig through the add
+            menu to reach bulk import. */}
+        <TouchableOpacity
+          style={s.insuranceBtn}
+          onPress={() => router.push('/import')}
+        >
+          <Text style={s.insuranceIcon}>📥</Text>
+          <View style={{ flex: 1 }}>
+            <View style={s.insuranceTitleRow}>
+              <Text style={s.insuranceTitle}>Import from Spreadsheet</Text>
+            </View>
+            <Text style={s.insuranceSub}>Bulk-add firearms from a CSV or TSV file</Text>
           </View>
           <Text style={s.insuranceChevron}>›</Text>
         </TouchableOpacity>
