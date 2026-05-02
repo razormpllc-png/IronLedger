@@ -1,43 +1,49 @@
-// Purchase service: wraps RevenueCat with a graceful fallback.
-//
-// While PURCHASES_ENABLED is false, the module runs in "stub mode": prices
-// are the fallback strings in purchaseConfig, and purchase() just flips the
-// local tier so we can demo the full UX without a native build. The moment
-// PURCHASES_ENABLED flips to true AND `react-native-purchases` is installed,
-// every call routes to RevenueCat and the local tier becomes a mirror of
-// RevenueCat's customer entitlements.
+// Purchase service: wraps expo-iap (StoreKit 2 on iOS, Play Billing on Android)
+// with no third-party purchase backend. Receipts are validated client-side via
+// StoreKit 2's signed Transaction objects. There is intentionally no "stub
+// mode" path in production: if products fail to load or a purchase fails, the
+// purchase fails — we do NOT silently grant entitlement (that's the bug Apple
+// flagged in build 17 review).
 
-import { Platform, Linking } from 'react-native';
+import { Platform } from 'react-native';
+import {
+  initConnection,
+  endConnection,
+  fetchProducts,
+  requestPurchase,
+  finishTransaction,
+  getAvailablePurchases,
+  purchaseUpdatedListener,
+  purchaseErrorListener,
+  ErrorCode,
+  type Product,
+  type ProductSubscription,
+  type Purchase,
+  type PurchaseIOS,
+  type PurchaseError,
+} from 'expo-iap';
+
 import { entitlementsStore, Tier } from './entitlements';
 import {
-  PURCHASES_ENABLED,
-  REVENUECAT_API_KEYS,
-  ENTITLEMENT_IDS,
-  PACKAGE_IDS,
-  PackageKey,
+  PRODUCT_IDS,
+  productIdToTier,
+  type ProductKey,
   FALLBACK_PRICES,
 } from './purchaseConfig';
 
-// Dynamic import guard. react-native-purchases is not in package.json until
-// the user installs it; without this guard, Metro would throw at bundle time.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let Purchases: any = null;
-let PurchasesError: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require('react-native-purchases');
-  Purchases = mod.default ?? mod;
-  PurchasesError = mod.PurchasesError;
-} catch {
-  // react-native-purchases not installed yet. Stub mode will handle it.
-}
+// ────────────────────────────────────────────────────────────────────────
+// Public types (preserved across rewrites — paywall components depend on
+// these shapes, so changing them ripples into UI code).
+// ────────────────────────────────────────────────────────────────────────
 
 export interface PackageDisplay {
-  key: PackageKey;
+  /** Stable key the UI uses to identify this product (e.g. 'vault_yearly') */
+  key: ProductKey;
+  /** Localized price string from StoreKit, e.g. "$24.99". Falls back to a
+   *  static string when the store hasn't loaded yet. */
   priceString: string;
-  // Raw package reference handed back to purchase() unchanged. Opaque to UI.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  raw: any | null;
+  /** Raw product reference. Opaque to UI; passed back into purchase(). */
+  raw: ProductSubscription | null;
 }
 
 export interface PurchaseResult {
@@ -47,232 +53,324 @@ export interface PurchaseResult {
   error?: string;
 }
 
+export interface SubscriptionSummary {
+  live: boolean;
+  productId: string | null;
+  periodType: string | null;
+  expiresAt: string | null;
+  willRenew: boolean | null;
+  store: string | null;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Module state
+// ────────────────────────────────────────────────────────────────────────
+
 let initialized = false;
+let connectionReady = false;
+let cachedProducts: Map<string, ProductSubscription> = new Map();
+let purchaseSub: { remove: () => void } | null = null;
+let errorSub: { remove: () => void } | null = null;
+
+// ────────────────────────────────────────────────────────────────────────
+// Init / teardown
+// ────────────────────────────────────────────────────────────────────────
 
 /**
- * Configure RevenueCat with the platform API key and start listening for
- * customer info updates. Safe to call multiple times.
+ * Connect to the platform store, fetch the catalog, sync any active
+ * entitlements, and start listening for transaction updates. Safe to call
+ * multiple times — idempotent.
  */
 export async function initPurchases(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
-  if (!isLive()) {
-    if (__DEV__) console.log('[purchases] stub mode — RevenueCat not active');
-    return;
-  }
-
-  const apiKey =
-    Platform.OS === 'ios' ? REVENUECAT_API_KEYS.ios : REVENUECAT_API_KEYS.android;
-
-  if (!apiKey) {
-    console.warn('[purchases] PURCHASES_ENABLED=true but no API key for', Platform.OS);
-    return;
-  }
-
   try {
-    // Reasonable log level defaults. Users can flip to VERBOSE while debugging.
-    if (Purchases.setLogLevel && Purchases.LOG_LEVEL) {
-      Purchases.setLogLevel(__DEV__ ? Purchases.LOG_LEVEL.WARN : Purchases.LOG_LEVEL.ERROR);
+    connectionReady = await initConnection();
+    if (!connectionReady) {
+      console.warn('[purchases] initConnection returned false');
+      return;
     }
-    await Purchases.configure({ apiKey });
 
-    // Pull current entitlements once at boot so an already-subscribed user
-    // lands straight on Pro without hitting a purchase flow.
-    const info = await Purchases.getCustomerInfo();
-    await syncTierFromCustomerInfo(info);
+    // Fetch the catalog so the paywall has localized prices ready.
+    await loadProductCatalog();
 
-    // Keep the local store in lockstep with RC's server-side truth.
-    Purchases.addCustomerInfoUpdateListener((next: unknown) => {
-      syncTierFromCustomerInfo(next).catch(e =>
-        console.warn('[purchases] sync failed', e)
-      );
+    // Replay any historical purchases — the user may have bought on another
+    // device or reinstalled. This is what flips a returning subscriber to
+    // their correct tier on cold start.
+    await syncFromAvailablePurchases();
+
+    // Listen for transactions that complete after we asked for them. On iOS
+    // this also fires for Ask-to-Buy approvals and family-sharing changes.
+    purchaseSub = purchaseUpdatedListener(handleTransactionUpdate);
+    errorSub = purchaseErrorListener(err => {
+      // User-cancel is normal; everything else is worth a warning.
+      if (err.code !== ErrorCode.UserCancelled) {
+        console.warn('[purchases] transaction error', err.code, err.message);
+      }
     });
   } catch (e) {
     console.warn('[purchases] init failed', e);
   }
 }
 
-/**
- * Fetch the current default offering and return display-ready packages for
- * the paywall. Always returns entries for all three keys — raw is null when
- * a package is missing (either stub mode or misconfigured offering).
- */
-export async function getOfferingPackages(): Promise<Record<PackageKey, PackageDisplay>> {
-  const out: Record<PackageKey, PackageDisplay> = {
-    monthly: { key: 'monthly', priceString: FALLBACK_PRICES.monthly, raw: null },
-    annual: { key: 'annual', priceString: FALLBACK_PRICES.annual, raw: null },
-    lifetime: { key: 'lifetime', priceString: FALLBACK_PRICES.lifetime, raw: null },
-  };
+export async function teardownPurchases(): Promise<void> {
+  purchaseSub?.remove();
+  errorSub?.remove();
+  purchaseSub = null;
+  errorSub = null;
+  if (connectionReady) {
+    try { await endConnection(); } catch {}
+  }
+  connectionReady = false;
+  initialized = false;
+}
 
-  if (!isLive()) return out;
-
-  try {
-    const offerings = await Purchases.getOfferings();
-    const current = offerings?.current;
-    if (!current) return out;
-
-    for (const key of Object.keys(out) as PackageKey[]) {
-      const rcId = PACKAGE_IDS[key];
-      // availablePackages is an array with identifiers like $rc_monthly etc.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pkg = current.availablePackages?.find((p: any) => p.identifier === rcId);
-      if (pkg) {
-        out[key] = {
-          key,
-          priceString: pkg.product?.priceString ?? FALLBACK_PRICES[key],
-          raw: pkg,
-        };
-      }
+async function loadProductCatalog(): Promise<void> {
+  const skus = Object.values(PRODUCT_IDS);
+  // All 4 of our products are subscriptions — see purchaseConfig.ts.
+  const products = (await fetchProducts({ skus, type: 'subs' })) as
+    ProductSubscription[];
+  cachedProducts = new Map((products ?? []).map(p => [p.id, p]));
+  if (__DEV__) {
+    console.log('[purchases] loaded', cachedProducts.size, 'of', skus.length, 'products');
+    if (cachedProducts.size < skus.length) {
+      const missing = skus.filter(s => !cachedProducts.has(s));
+      console.warn('[purchases] missing products in store:', missing);
     }
-  } catch (e) {
-    console.warn('[purchases] getOfferings failed, using fallback prices', e);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Catalog accessor — used by paywall to render prices.
+// ────────────────────────────────────────────────────────────────────────
+
+export async function getOfferingPackages(): Promise<Record<ProductKey, PackageDisplay>> {
+  // Lazy refresh the catalog if we don't have it yet (e.g. paywall opens
+  // before initPurchases finished). Failure is non-fatal — fallback prices
+  // render fine.
+  if (cachedProducts.size === 0 && connectionReady) {
+    try { await loadProductCatalog(); } catch {}
   }
 
+  const out = {} as Record<ProductKey, PackageDisplay>;
+  for (const key of Object.keys(PRODUCT_IDS) as ProductKey[]) {
+    const sku = PRODUCT_IDS[key];
+    const raw = cachedProducts.get(sku) ?? null;
+    out[key] = {
+      key,
+      priceString: raw?.displayPrice ?? FALLBACK_PRICES[key],
+      raw,
+    };
+  }
   return out;
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// Purchase
+// ────────────────────────────────────────────────────────────────────────
+
 /**
- * Start a purchase flow. In stub mode this just flips the local tier so we
- * can demo without native IAP. In live mode this runs the real RevenueCat
- * purchase sheet and syncs the tier from the returned customerInfo.
+ * Run the platform purchase sheet for the given package. Returns a result
+ * the UI can act on. Critically, this NEVER grants entitlement on its own
+ * decision — entitlement is granted only after a verified transaction
+ * arrives via the purchaseUpdatedListener.
  */
 export async function purchase(pkg: PackageDisplay): Promise<PurchaseResult> {
-  if (!isLive() || !pkg.raw) {
-    const tier: Tier = pkg.key === 'lifetime' ? 'founders' : 'pro';
-    await entitlementsStore.setTier(tier);
-    return { success: true, tier };
+  // Production guard: if we have no product reference, the store didn't
+  // load this SKU and there is nothing to purchase. Fail loudly rather
+  // than fake-grant.
+  if (!pkg.raw) {
+    return {
+      success: false,
+      tier: entitlementsStore.getTier(),
+      error: 'This product is currently unavailable. Please try again later.',
+    };
+  }
+  if (!connectionReady) {
+    return {
+      success: false,
+      tier: entitlementsStore.getTier(),
+      error: 'Store is not available. Please try again later.',
+    };
   }
 
   try {
-    const res = await Purchases.purchasePackage(pkg.raw);
-    const info = res?.customerInfo ?? res;
-    const tier = await syncTierFromCustomerInfo(info);
-    return { success: true, tier };
+    // All Iron Ledger products are auto-renewing subscriptions, so type is
+    // always 'subs'. On Android, subscriptions require offerTokens which
+    // expo-iap surfaces on Product via subscriptionOfferDetailsAndroid.
+    const offerDetails =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((pkg.raw as any).subscriptionOfferDetailsAndroid ?? []) as Array<{
+        offerToken: string;
+      }>;
+
+    // requestPurchase fires the platform sheet. The actual transaction
+    // arrives asynchronously through purchaseUpdatedListener. We await it
+    // here only to surface user-cancel synchronously.
+    await requestPurchase({
+      request: {
+        ios: { sku: pkg.raw.id },
+        android: {
+          skus: [pkg.raw.id],
+          subscriptionOffers: offerDetails.map(o => ({
+            sku: pkg.raw!.id,
+            offerToken: o.offerToken,
+          })),
+        },
+      },
+      type: 'subs',
+    });
+
+    // The listener will sync entitlements within ~milliseconds. Wait briefly
+    // so the UI gets a current tier value back rather than stale.
+    await waitForTier(productIdToTier(pkg.raw.id), 4000);
+
+    return { success: true, tier: entitlementsStore.getTier() };
   } catch (e) {
-    // RevenueCat surfaces a standardized `userCancelled` boolean.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const err = e as any;
-    if (err?.userCancelled) {
+    const err = e as PurchaseError | Error;
+    if ((err as PurchaseError).code === ErrorCode.UserCancelled) {
       return { success: false, tier: entitlementsStore.getTier(), cancelled: true };
     }
     console.warn('[purchases] purchase failed', err);
     return {
       success: false,
       tier: entitlementsStore.getTier(),
-      error: err?.message ?? 'Purchase failed',
+      error: err.message ?? 'Purchase failed',
     };
   }
 }
 
 /**
- * Restore any entitlements tied to the user's store account. No-op in stub.
+ * Wait until the entitlements store reports a tier matching `expected` (or
+ * any tier upgrade), up to `timeoutMs`. Returns when the listener has
+ * processed the new transaction so the caller can read a fresh tier.
  */
+function waitForTier(expected: Tier, timeoutMs: number): Promise<void> {
+  return new Promise(resolve => {
+    if (entitlementsStore.getTier() === expected) return resolve();
+    const t = setTimeout(() => {
+      unsub();
+      resolve();
+    }, timeoutMs);
+    const unsub = entitlementsStore.subscribe(() => {
+      if (entitlementsStore.getTier() === expected) {
+        clearTimeout(t);
+        unsub();
+        resolve();
+      }
+    });
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Restore
+// ────────────────────────────────────────────────────────────────────────
+
 export async function restorePurchases(): Promise<PurchaseResult> {
-  if (!isLive()) {
+  if (!connectionReady) {
     return {
-      success: true,
+      success: false,
       tier: entitlementsStore.getTier(),
+      error: 'Store is not available.',
     };
   }
-
   try {
-    const info = await Purchases.restorePurchases();
-    const tier = await syncTierFromCustomerInfo(info);
+    const tier = await syncFromAvailablePurchases();
     return { success: true, tier };
   } catch (e) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const err = e as any;
+    const err = e as Error;
     console.warn('[purchases] restore failed', err);
     return {
       success: false,
       tier: entitlementsStore.getTier(),
-      error: err?.message ?? 'Restore failed',
+      error: err.message ?? 'Restore failed',
     };
   }
 }
 
-/**
- * Read the active entitlements off a RevenueCat CustomerInfo object and
- * reduce them into a single Tier. Founders beats Pro beats Lite.
- */
-async function syncTierFromCustomerInfo(info: unknown): Promise<Tier> {
-  const active = readActiveEntitlements(info);
-  let tier: Tier = 'lite';
-  if (active.has(ENTITLEMENT_IDS.founders)) tier = 'founders';
-  else if (active.has(ENTITLEMENT_IDS.pro)) tier = 'pro';
+async function syncFromAvailablePurchases(): Promise<Tier> {
+  const purchases = await getAvailablePurchases();
+  const tier = highestTierFrom(purchases);
   await entitlementsStore.setTier(tier);
   return tier;
 }
 
-function readActiveEntitlements(info: unknown): Set<string> {
-  const out = new Set<string>();
-  if (!info || typeof info !== 'object') return out;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const active = (info as any).entitlements?.active;
-  if (!active) return out;
-  for (const id of Object.keys(active)) out.add(id);
-  return out;
+function highestTierFrom(purchases: Purchase[]): Tier {
+  let best: Tier = 'lite';
+  for (const p of purchases) {
+    const t = productIdToTier(p.productId);
+    if (t === 'vault_pro') return 'vault_pro';
+    if (t === 'vault' && best === 'lite') best = 'vault';
+  }
+  return best;
 }
 
-function isLive(): boolean {
-  return PURCHASES_ENABLED && !!Purchases;
+// ────────────────────────────────────────────────────────────────────────
+// Transaction listener — the ONLY place that grants entitlement.
+// ────────────────────────────────────────────────────────────────────────
+
+async function handleTransactionUpdate(purchase: Purchase): Promise<void> {
+  try {
+    const tier = productIdToTier(purchase.productId);
+    if (tier !== 'lite') {
+      const current = entitlementsStore.getTier();
+      const next = pickHigher(current, tier);
+      await entitlementsStore.setTier(next);
+    }
+    await finishTransaction({ purchase, isConsumable: false });
+  } catch (e) {
+    console.warn('[purchases] handleTransactionUpdate failed', e);
+  }
 }
 
-/**
- * Exposed for diagnostics (e.g. a dev panel). Returns whether the live
- * RevenueCat pipeline is actually wired.
- */
-export function purchasesLiveMode(): boolean {
-  return isLive();
+function pickHigher(a: Tier, b: Tier): Tier {
+  const rank: Record<Tier, number> = { lite: 0, vault: 1, vault_pro: 2 };
+  return rank[a] >= rank[b] ? a : b;
 }
-
-// Export for places that want to show fallback pricing without touching RC
-// at all (e.g. rendering the paywall before offerings have loaded).
-export { FALLBACK_PRICES };
 
 // ────────────────────────────────────────────────────────────────────────
 // Subscription management surface area — used by /subscription screen.
 // ────────────────────────────────────────────────────────────────────────
 
-/** Summary of the active subscription pulled from RevenueCat. All fields
- *  are optional so the UI can show partial info gracefully. */
-export interface SubscriptionSummary {
-  live: boolean;              // True when we're talking to real RC
-  productId: string | null;   // e.g. 'ironledger.pro.annual'
-  periodType: string | null;  // 'normal' | 'trial' | 'intro'
-  expiresAt: string | null;   // ISO timestamp when the current period ends
-  willRenew: boolean | null;
-  store: string | null;       // 'APP_STORE' | 'PLAY_STORE' | 'PROMOTIONAL' etc.
-}
-
-/** Pull the current subscription summary. In stub mode (or when nothing is
- *  active) returns a minimal shape with `live: false`. Safe to call from
- *  any screen — no side effects. */
 export async function getSubscriptionSummary(): Promise<SubscriptionSummary> {
   const base: SubscriptionSummary = {
-    live: isLive(),
+    live: connectionReady,
     productId: null,
     periodType: null,
     expiresAt: null,
     willRenew: null,
-    store: null,
+    store: Platform.OS === 'ios' ? 'APP_STORE' : 'PLAY_STORE',
   };
-  if (!isLive()) return base;
+
+  if (!connectionReady) return base;
+
   try {
-    const info = await Purchases.getCustomerInfo();
-    // Prefer the active pro entitlement; fall back to founders (lifetime).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const active: Record<string, any> = info?.entitlements?.active ?? {};
-    const ent = active[ENTITLEMENT_IDS.pro] ?? active[ENTITLEMENT_IDS.founders];
-    if (!ent) return base;
+    const purchases = await getAvailablePurchases();
+    if (purchases.length === 0) return base;
+
+    const ranked = [...purchases].sort((a, b) => {
+      const ta = productIdToTier(a.productId);
+      const tb = productIdToTier(b.productId);
+      const rank: Record<Tier, number> = { lite: 0, vault: 1, vault_pro: 2 };
+      return rank[tb] - rank[ta];
+    });
+    const top = ranked[0] as Purchase;
+
+    // Narrow to PurchaseIOS only when this purchase came from the App Store;
+    // expirationDateIOS doesn't exist on the Android variant.
+    const iosFields = top.store === 'apple' ? (top as PurchaseIOS) : null;
+    const expiresAt = iosFields?.expirationDateIOS
+      ? new Date(iosFields.expirationDateIOS).toISOString()
+      : null;
+
     return {
       live: true,
-      productId: ent.productIdentifier ?? null,
-      periodType: ent.periodType ?? null,
-      expiresAt: ent.expirationDate ?? null,
-      willRenew: ent.willRenew ?? null,
-      store: ent.store ?? null,
+      productId: top.productId,
+      periodType: 'normal',
+      expiresAt,
+      willRenew: top.isAutoRenewing,
+      store: base.store,
     };
   } catch (e) {
     console.warn('[purchases] getSubscriptionSummary failed', e);
@@ -280,10 +378,8 @@ export async function getSubscriptionSummary(): Promise<SubscriptionSummary> {
   }
 }
 
-/** Open the platform-managed subscription page so the user can change plan
- *  or cancel. iOS pops the App Store subscriptions sheet; Android opens the
- *  Play Store subscriptions page. Returns true if the URL was dispatched. */
 export async function openManageSubscriptions(): Promise<boolean> {
+  const { Linking } = require('react-native');
   const url = Platform.OS === 'ios'
     ? 'itms-apps://apps.apple.com/account/subscriptions'
     : 'https://play.google.com/store/account/subscriptions';
@@ -295,3 +391,11 @@ export async function openManageSubscriptions(): Promise<boolean> {
     return false;
   }
 }
+
+/** True when we have a working store connection. Used by /subscription
+ *  screen to decide whether to show "billing details". */
+export function purchasesLiveMode(): boolean {
+  return connectionReady;
+}
+
+export { FALLBACK_PRICES };

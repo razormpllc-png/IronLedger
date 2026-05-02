@@ -1,5 +1,7 @@
-// Entitlements module — single source of truth for Pro feature gating.
-// Backed by AsyncStorage for dev; will be wired to RevenueCat in a later step.
+// Entitlements module — single source of truth for paid feature gating.
+// Backed by AsyncStorage. Updated for the Vault / Vault Pro 2-tier model
+// (replacing the old pro / founders model). Existing users with stored
+// 'pro' or 'founders' values are migrated on load — see load() below.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -7,7 +9,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Types
 // ────────────────────────────────────────────────────────────────────────
 
-export type Tier = 'lite' | 'pro' | 'founders';
+/** The paid tier the user is on. Order matters for tierLabel display and
+ *  for the upgrade ladder logic in lib/purchases.ts. */
+export type Tier = 'lite' | 'vault' | 'vault_pro';
 
 export type Feature =
   | 'unlimited_firearms'
@@ -25,9 +29,12 @@ export type Feature =
   | 'ai_recognition'
   | 'razormp_content'
   | 'document_storage'
-  | 'photo_gallery_full';
+  | 'photo_gallery_full'
+  // Pro-only (Vault Pro tier) features:
+  | 'competition_module'
+  | 'estate_export'
+  | 'ffl_bound_book_audit';
 
-// What the user chose during onboarding — used to tailor paywall copy.
 export type OnboardingPath =
   | 'protect_records'
   | 'track_maintenance'
@@ -39,7 +46,7 @@ export type OnboardingPath =
 // ────────────────────────────────────────────────────────────────────────
 
 export interface TierLimits {
-  maxFirearms: number;           // Infinity for unlimited
+  maxFirearms: number;
   maxPhotosPerFirearm: number;
   maxAccessoriesPerFirearm: number;
 }
@@ -50,12 +57,12 @@ export const LIMITS: Record<Tier, TierLimits> = {
     maxPhotosPerFirearm: 1,
     maxAccessoriesPerFirearm: 2,
   },
-  pro: {
+  vault: {
     maxFirearms: Infinity,
     maxPhotosPerFirearm: 20,
     maxAccessoriesPerFirearm: Infinity,
   },
-  founders: {
+  vault_pro: {
     maxFirearms: Infinity,
     maxPhotosPerFirearm: 20,
     maxAccessoriesPerFirearm: Infinity,
@@ -66,36 +73,42 @@ export const LIMITS: Record<Tier, TierLimits> = {
 // Feature gates
 // ────────────────────────────────────────────────────────────────────────
 
-// Every feature in the app either gates on a Pro tier or is free.
-// Lite has no Pro features. Pro and Founders have everything.
-const PRO_FEATURES: Feature[] = [
+// Features available on Vault and above.
+const VAULT_FEATURES: Feature[] = [
   'unlimited_firearms',
   'unlimited_accessories',
   'smart_battery_prefill',
   'battery_reminders',
   'maintenance_reminders',
+  'icloud_sync',
+  'document_storage',
+  'photo_gallery_full',
+  'razormp_content',
+  'ai_recognition',
+];
+
+// Features ONLY available on Vault Pro.
+const VAULT_PRO_FEATURES: Feature[] = [
   'nfa_tracking',
   'atf_ocr',
   'insurance_export',
   'ffl_bound_book',
   'dope_cards',
   'range_day',
-  'icloud_sync',
-  'ai_recognition',
-  'razormp_content',
-  'document_storage',
-  'photo_gallery_full',
+  'competition_module',
+  'estate_export',
+  'ffl_bound_book_audit',
 ];
 
-export function isProTier(tier: Tier): boolean {
-  return tier === 'pro' || tier === 'founders';
+export function isPaidTier(tier: Tier): boolean {
+  return tier === 'vault' || tier === 'vault_pro';
 }
 
 export function hasFeature(tier: Tier, feature: Feature): boolean {
-  if (isProTier(tier)) return true;
-  // Lite has access to everything NOT in PRO_FEATURES. Since all gated
-  // features are listed, this collapses to a simple check.
-  return !PRO_FEATURES.includes(feature);
+  if (tier === 'vault_pro') return true; // Pro gets everything.
+  if (tier === 'vault') return VAULT_FEATURES.includes(feature);
+  // Lite has access to anything not in either paid bucket.
+  return !VAULT_FEATURES.includes(feature) && !VAULT_PRO_FEATURES.includes(feature);
 }
 
 export function limitsFor(tier: Tier): TierLimits {
@@ -105,14 +118,14 @@ export function limitsFor(tier: Tier): TierLimits {
 // Display name for UI.
 export function tierLabel(tier: Tier): string {
   switch (tier) {
-    case 'lite': return 'Iron Ledger Lite';
-    case 'pro': return 'Iron Ledger Pro';
-    case 'founders': return 'Founders Lifetime';
+    case 'lite': return 'Lite';
+    case 'vault': return 'Vault';
+    case 'vault_pro': return 'Vault Pro';
   }
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// Persistence + subscription model
+// Persistence
 // ────────────────────────────────────────────────────────────────────────
 
 const STORAGE_KEYS = {
@@ -128,17 +141,11 @@ export interface EntitlementsSnapshot {
   tier: Tier;
   onboardingPath: OnboardingPath | null;
   onboardingComplete: boolean;
-  /** True once the user has dismissed (or deep-linked through) the
-   *  path-aware dashboard spotlight. Kept separate from onboardingComplete
-   *  so we can re-surface the card after a path change. */
   pathSpotlightDismissed: boolean;
   loaded: boolean;
 }
 
 class EntitlementsStore {
-  // IMPORTANT: cache the snapshot object reference. useSyncExternalStore
-  // compares snapshots by ===, so getSnapshot() must return the same object
-  // until something actually changes or React will loop infinitely.
   private snapshot: EntitlementsSnapshot = {
     tier: 'lite',
     onboardingPath: null,
@@ -150,10 +157,12 @@ class EntitlementsStore {
 
   async load(): Promise<void> {
     if (this.snapshot.loaded) return;
+
     let tier: Tier = 'lite';
     let onboardingPath: OnboardingPath | null = null;
     let onboardingComplete = false;
     let pathSpotlightDismissed = false;
+
     try {
       const [tierRaw, pathRaw, completeRaw, spotlightRaw] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.tier),
@@ -161,9 +170,15 @@ class EntitlementsStore {
         AsyncStorage.getItem(STORAGE_KEYS.onboardingComplete),
         AsyncStorage.getItem(STORAGE_KEYS.pathSpotlightDismissed),
       ]);
-      if (tierRaw === 'pro' || tierRaw === 'founders' || tierRaw === 'lite') {
-        tier = tierRaw;
-      }
+
+      // Migrate legacy values from the pro/founders model. Anyone who had
+      // 'pro' becomes 'vault'; 'founders' (lifetime) becomes 'vault_pro'
+      // since founders had everything. After lib/purchases.ts runs its
+      // restore on app start, the real receipt-derived tier overrides this
+      // anyway — this is just to avoid a flicker through Lite for legacy
+      // installs.
+      tier = migrateLegacyTier(tierRaw);
+
       if (pathRaw && ['protect_records', 'track_maintenance', 'manage_nfa', 'plan_range_days'].includes(pathRaw)) {
         onboardingPath = pathRaw as OnboardingPath;
       }
@@ -172,7 +187,14 @@ class EntitlementsStore {
     } catch (e) {
       console.warn('[entitlements] load failed, defaulting to lite', e);
     }
-    this.replaceSnapshot({ tier, onboardingPath, onboardingComplete, pathSpotlightDismissed, loaded: true });
+
+    this.replaceSnapshot({
+      tier,
+      onboardingPath,
+      onboardingComplete,
+      pathSpotlightDismissed,
+      loaded: true,
+    });
   }
 
   getSnapshot(): EntitlementsSnapshot { return this.snapshot; }
@@ -189,8 +211,6 @@ class EntitlementsStore {
 
   async setOnboardingPath(path: OnboardingPath): Promise<void> {
     if (this.snapshot.onboardingPath === path) return;
-    // Re-surface the spotlight card when the path changes so the new
-    // selection gets its own "start here" nudge.
     this.replaceSnapshot({
       ...this.snapshot,
       onboardingPath: path,
@@ -208,9 +228,6 @@ class EntitlementsStore {
     await AsyncStorage.setItem(STORAGE_KEYS.pathSpotlightDismissed, 'true');
   }
 
-  /** Clear the "user tapped X on the spotlight" flag so the spotlight card
-   *  can surface again — called when the user switches focus via
-   *  /change-focus so the new path's guidance gets a fresh shot. */
   async resetPathSpotlightDismissed(): Promise<void> {
     if (!this.snapshot.pathSpotlightDismissed) return;
     this.replaceSnapshot({ ...this.snapshot, pathSpotlightDismissed: false });
@@ -250,8 +267,20 @@ class EntitlementsStore {
   }
 }
 
-export const entitlementsStore = new EntitlementsStore();
+function migrateLegacyTier(raw: string | null): Tier {
+  if (raw === 'vault' || raw === 'vault_pro' || raw === 'lite') return raw;
+  if (raw === 'pro') return 'vault';
+  if (raw === 'founders') return 'vault_pro';
+  return 'lite';
+}
 
-// Kick off initial load. Hook consumers will see loaded=false briefly,
-// then re-render via subscription when real values land from AsyncStorage.
+export const entitlementsStore = new EntitlementsStore();
 entitlementsStore.load();
+
+// ────────────────────────────────────────────────────────────────────────
+// Backward-compat re-exports — old code may import these names. Remove
+// once all references are updated.
+// ────────────────────────────────────────────────────────────────────────
+
+/** @deprecated use isPaidTier */
+export const isProTier = isPaidTier;

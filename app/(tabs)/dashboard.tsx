@@ -108,9 +108,9 @@ function composeLogLabel(log: BatteryLogWithFirearm): { acc: string; firearm: st
 }
 
 const TIER_OPTIONS: { key: Tier; label: string }[] = [
-  { key: 'free', label: 'Free' },
+  { key: 'lite', label: 'Free' },
   { key: 'vault', label: 'Vault' },
-  { key: 'vaultpro', label: 'Vault Pro' },
+  { key: 'vault_pro', label: 'Vault Pro' },
 ];
 
 export default function DashboardScreen() {
