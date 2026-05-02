@@ -1802,6 +1802,12 @@ export function countFirearmsForTrust(trust_id: number): number {
   return r?.count || 0;
 }
 
+export function getItemCount(): number {
+  const f = db.getFirstSync('SELECT COUNT(*) as n FROM firearms') as { n: number };
+  const s = db.getFirstSync('SELECT COUNT(*) as n FROM suppressors') as { n: number };
+  return (f?.n ?? 0) + (s?.n ?? 0);
+}
+
 export function getAllNfaItems(): Firearm[] {
   return db.getAllSync(
     'SELECT * FROM firearms WHERE is_nfa = 1 ORDER BY date_filed DESC, created_at DESC'

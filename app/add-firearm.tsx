@@ -8,7 +8,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import FormScrollView from '../components/FormScrollView';
 import { router, useFocusEffect } from 'expo-router';
 import { useAutoSave } from '../lib/useDraft';
-import { addFirearm, resolveImageUri, getAllFirearms, getAllSuppressors, getAllNfaTrusts, getNfaTrustById, setFirearmAtfForm } from '../lib/database';
+import { addFirearm, resolveImageUri, getAllFirearms, getAllSuppressors, getAllNfaTrusts, getNfaTrustById, setFirearmAtfForm, getItemCount } from '../lib/database';
 import { saveScanToAtfForms } from '../lib/atfScans';
 import { syncWidgets } from '../lib/widgetSync';
 import type { NfaTrust } from '../lib/database';
@@ -17,8 +17,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
 import { File, Directory, Paths } from 'expo-file-system';
 import { useEntitlements } from '../lib/useEntitlements';
+import { limitsFor } from '../lib/entitlements';
 import { showPaywall, runProGated } from '../lib/paywall';
-import { useSubscription } from '../hooks/useSubscription';
 import { scanAtfForm } from '../lib/atfOcr';
 import type { AtfExtracted } from '../lib/atfOcr';
 import { scanReceipt } from '../lib/receiptOcr';
@@ -69,7 +69,6 @@ async function saveImagePermanently(uri: string): Promise<string> {
 
 export default function AddFirearm() {
   const ent = useEntitlements();
-  const subscription = useSubscription();
   const [nickname, setNickname] = useState('');
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
@@ -629,7 +628,7 @@ export default function AddFirearm() {
       return;
     }
     // Free-tier hard cap: combined firearms + suppressors.
-    if (!subscription.canAddItem()) {
+    if (getItemCount() >= limitsFor(ent.tier).maxFirearms) {
       showPaywall({ mode: 'hard_cap', reason: 'firearm_limit' });
       return;
     }
