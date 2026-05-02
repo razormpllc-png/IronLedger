@@ -30,12 +30,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import {
   getDopeCardById, getFirearmById, deleteDopeCard,
   getDopeEntriesForCard, insertDopeEntry, updateDopeEntry, deleteDopeEntry,
   DopeCard, DopeEntry, DopeShot, Firearm,
 } from '../../lib/database';
+import { useFeatureGate } from '../../hooks/useFeatureGate';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -81,6 +82,7 @@ function shotsEmpty(shots: DopeShot[]): boolean {
 }
 
 export default function DopeDetailScreen() {
+  useFeatureGate('vaultpro');
   const { id } = useLocalSearchParams<{ id: string }>();
   const cardId = parseInt(String(id), 10);
 
