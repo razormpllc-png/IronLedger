@@ -37,6 +37,7 @@ import { useEntitlements } from '../../lib/useEntitlements';
 import { showPaywall } from '../../lib/paywall';
 import AtfFormSection from '../../components/AtfFormSection';
 import * as ImagePicker from 'expo-image-picker';
+import * as WebBrowser from 'expo-web-browser';
 import { File, Directory, Paths } from 'expo-file-system';
 
 const GOLD = '#C9A84C';
@@ -779,8 +780,11 @@ export default function FirearmDetail() {
             onPress={() => {
               // TrueGunValue has no generic /search endpoint (404s).
               // Google site-search reliably lands on matching TGV pages.
+              // Use the in-app browser (SFSafariViewController on iOS) so the
+              // user returns to this screen with a single "Done" tap instead
+              // of having to switch apps back from Safari.
               const q = encodeURIComponent(`${firearm.make} ${firearm.model}`.trim());
-              Linking.openURL(`https://www.google.com/search?q=site%3Atruegunvalue.com+${q}`);
+              WebBrowser.openBrowserAsync(`https://www.google.com/search?q=site%3Atruegunvalue.com+${q}`);
             }}
           >
             <Text style={{ color: '#4A90D9', fontSize: 13, fontWeight: '600' }}>

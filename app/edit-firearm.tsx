@@ -15,6 +15,7 @@ import type { NfaTrust } from '../lib/database';
 import { syncWidgets } from '../lib/widgetSync';
 import SmartField from '../components/SmartField';
 import * as ImagePicker from 'expo-image-picker';
+import * as WebBrowser from 'expo-web-browser';
 import { File, Directory, Paths } from 'expo-file-system';
 import { useEntitlements } from '../lib/useEntitlements';
 import { runProGated } from '../lib/paywall';
@@ -596,8 +597,11 @@ export default function EditFirearm() {
               onPress={() => {
                 // TrueGunValue has no generic /search endpoint (404s).
                 // Google site-search reliably lands on matching TGV pages.
+                // Use the in-app browser (SFSafariViewController on iOS) so the
+                // user returns to this form with a single "Done" tap instead of
+                // having to switch apps back from Safari.
                 const q = encodeURIComponent(`${make} ${model}`.trim());
-                Linking.openURL(`https://www.google.com/search?q=site%3Atruegunvalue.com+${q}`);
+                WebBrowser.openBrowserAsync(`https://www.google.com/search?q=site%3Atruegunvalue.com+${q}`);
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={[s.linkBtnText, { color: '#4A90D9' }]}>Look up on TrueGunValue ›</Text>
