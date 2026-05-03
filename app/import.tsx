@@ -18,9 +18,12 @@ import {
   parseFile, guessFieldMapping, rowsToFirearms,
   IMPORTABLE_FIELDS, ImportableField, ParsedFile, ImportedFirearm,
 } from '../lib/importParser';
-import { addFirearm } from '../lib/database';
+import { addFirearm, getItemCount } from '../lib/database';
 import { syncWidgets } from '../lib/widgetSync';
 import { useFeatureGate } from '../hooks/useFeatureGate';
+import { useEntitlements } from '../lib/useEntitlements';
+import { limitsFor } from '../lib/entitlements';
+import { showPaywall } from '../lib/paywall';
 
 const GOLD = '#C9A84C';
 const BG = '#0D0D0D';
@@ -34,6 +37,7 @@ type Step = 'pick' | 'map' | 'preview' | 'done';
 
 export default function ImportScreen() {
   useFeatureGate('vault');
+  const ent = useEntitlements();
   const [step, setStep] = useState<Step>('pick');
   const [loading, setLoading] = useState(false);
   const [fileName, setFileName] = useState('');
@@ -155,6 +159,27 @@ export default function ImportScreen() {
 
   // ── Step 3: Import ─────────────────────────────────────────
   function handleImport() {
+    // Tier cap: block import if adding these rows would exceed the user's
+    // firearm limit. Lite is 5; Vault and Vault Pro are unlimited.
+    const cap = limitsFor(ent.tier).maxFirearms;
+    const currentCount = getItemCount();
+    const projected = currentCount + preview.length;
+    if (projected > cap) {
+      const remaining = Math.max(0, cap - currentCount);
+      Alert.alert(
+        'Import Exceeds Plan Limit',
+        `Your plan allows ${cap} firearms. You currently have ${currentCount}, ` +
+        `and this import would add ${preview.length} more (total ${projected}). ` +
+        (remaining > 0
+          ? `Upgrade to import all ${preview.length}, or trim your file to ${remaining} row${remaining === 1 ? '' : 's'}.`
+          : `Upgrade to import.`),
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Upgrade', onPress: () => showPaywall({ mode: 'hard_cap', reason: 'firearm_limit' }) },
+        ],
+      );
+      return;
+    }
     Alert.alert(
       'Confirm Import',
       `This will add ${preview.length} firearm${preview.length === 1 ? '' : 's'} to your Armory. Continue?`,
