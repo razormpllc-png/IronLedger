@@ -299,6 +299,8 @@ async function syncFromAvailablePurchases(): Promise<Tier> {
 function highestTierFrom(purchases: Purchase[]): Tier {
   let best: Tier = 'lite';
   for (const p of purchases) {
+    // Apple 2.1(b) defense: only count fully purchased transactions.
+    if (p.purchaseState !== 'purchased') continue;
     const t = productIdToTier(p.productId);
     if (t === 'vault_pro') return 'vault_pro';
     if (t === 'vault' && best === 'lite') best = 'vault';
@@ -312,6 +314,18 @@ function highestTierFrom(purchases: Purchase[]): Tier {
 
 async function handleTransactionUpdate(purchase: Purchase): Promise<void> {
   try {
+    // ────────────────────────────────────────────────────────────────────
+    // Apple 2.1(b) defense: ONLY grant entitlement on a fully purchased
+    // transaction. expo-iap's listener also fires for 'pending' (Ask-to-Buy,
+    // SCA challenges) and 'unknown' states. Granting on those is the silent-
+    // grant bug Apple rejected in build 17. Do not change this gate.
+    // ────────────────────────────────────────────────────────────────────
+    if (purchase.purchaseState !== 'purchased') {
+      if (__DEV__) {
+        console.log('[purchases] skip non-purchased state:', purchase.purchaseState, purchase.productId);
+      }
+      return;
+    }
     const tier = productIdToTier(purchase.productId);
     if (tier !== 'lite') {
       const current = entitlementsStore.getTier();
@@ -346,7 +360,10 @@ export async function getSubscriptionSummary(): Promise<SubscriptionSummary> {
   if (!connectionReady) return base;
 
   try {
-    const purchases = await getAvailablePurchases();
+    const allPurchases = await getAvailablePurchases();
+    // Apple 2.1(b) defense: only show fully purchased subscriptions in the
+    // management screen. Pending/unknown shouldn't display as active.
+    const purchases = allPurchases.filter(p => p.purchaseState === 'purchased');
     if (purchases.length === 0) return base;
 
     const ranked = [...purchases].sort((a, b) => {
